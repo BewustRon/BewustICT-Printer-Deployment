@@ -1,4 +1,4 @@
-name: Epson UPD - INF layout and built-in extraction test
+name: Epson UPD - verify INF and offline extraction
 on:
   push:
     paths:
@@ -11,55 +11,62 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - name: Validate signed official Epson v2.122 installer, test tar, inspect driver names
+      - name: Verify official Epson download and inspect INF/CAT without running installer
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $url = 'https://ftp.epson.com/drivers/EUPD_x64_212200.exe'
           $expectedHash = '3CC1C313ADFAB74F957E2AF63FF2FA87279169E3A043365EB0AF6024D420663B'
           $file = Join-Path $env:RUNNER_TEMP 'EUPD_x64_212200.exe'
-          Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $file -TimeoutSec 300
-          $hash = (Get-FileHash -Path $file -Algorithm SHA256).Hash
-          Write-Host "HASH=$hash"
+          Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $file -TimeoutSec 300 -ErrorAction Stop
+          $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+          Write-Host "SHA256=$hash"
           if ($hash -ne $expectedHash) { throw 'EPSON_HASH_MISMATCH' }
           $sig = Get-AuthenticodeSignature -LiteralPath $file
           Write-Host ('SIGNATURE_STATUS=' + $sig.Status)
           Write-Host ('SIGNER=' + $sig.SignerCertificate.Subject)
-          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'SEIKO EPSON') {
-            throw 'EPSON_SIGNATURE_INVALID'
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'SEIKO EPSON') { throw 'EPSON_SIGNATURE_INVALID' }
+
+          $dest = Join-Path $env:RUNNER_TEMP 'EpsonExtract'
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          # Test whether built-in .NET can read Epson's self-extracting PE/ZIP wrapper.
+          Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+          Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+          try {
+            $zip = [IO.Compression.ZipFile]::OpenRead($file)
+            try {
+              Write-Host ('DOTNET_SFX_READ_SUCCESS=' + $zip.Entries.Count)
+              [IO.Compression.ZipFile]::ExtractToDirectory($file, $dest)
+              Write-Host 'DOTNET_SFX_EXTRACTION=SUCCESS'
+            } finally { $zip.Dispose() }
+          } catch {
+            Write-Host ('DOTNET_SFX_EXTRACTION=UNSUPPORTED; reason=' + $_.Exception.Message)
           }
-          $seven = 'C:\Program Files\7-Zip\7z.exe'
-          $method = & $seven l -slt $file 2>&1
-          $method | Select-String -Pattern '^Type =|^Method =|^Physical Size =' | Select-Object -First 12 | ForEach-Object { Write-Host ('ARCHIVE=' + $_.Line) }
-          $tar = (Get-Command tar.exe -ErrorAction SilentlyContinue).Source
-          $dst = Join-Path $env:RUNNER_TEMP 'EpsonExtract'
-          New-Item -ItemType Directory -Path $dst -Force | Out-Null
-          if ($tar) {
-            $tarOutput = & $tar -tf $file 2>&1
-            $tarStatus = $LASTEXITCODE
-            Write-Host "TAR_SFX_LIST_EXITCODE=$tarStatus"
-            if ($tarStatus -eq 0) {
-              & $tar -xf $file -C $dst 2>&1 | Select-Object -First 12 | ForEach-Object { Write-Host $_ }
-              $tarExtractStatus = $LASTEXITCODE
-              Write-Host "TAR_SFX_EXTRACT_EXITCODE=$tarExtractStatus"
-            }
-          }
-          $inf = @(Get-ChildItem -Path $dst -Filter '*.inf' -Recurse -File -ErrorAction SilentlyContinue)
+
+          $inf = @(Get-ChildItem -LiteralPath $dest -Filter '*.inf' -File -Recurse -ErrorAction SilentlyContinue)
           if ($inf.Count -eq 0) {
-            & $seven x $file "-o$dst" '-y' | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw 'EPSON_7ZIP_EXTRACT_FAILED' }
-            $inf = @(Get-ChildItem -Path $dst -Filter '*.inf' -Recurse -File)
+            $seven = 'C:\Program Files\7-Zip\7z.exe'
+            if (-not (Test-Path -LiteralPath $seven)) { throw '7-Zip not found on runner.' }
+            Write-Host 'Use 7-Zip for CI extraction (tar.exe cannot parse this SFX PE/ZIP).'
+            & $seven x $file "-o$dest" '-y' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw ('7ZIP_EXTRACTION_FAILED:'+$LASTEXITCODE) }
+            $inf = @(Get-ChildItem -LiteralPath $dest -Filter '*.inf' -File -Recurse)
           }
+
+          if ($inf.Count -ne 1) { throw "Expected 1 Epson INF, got $($inf.Count)" }
           Write-Host ('INF_COUNT=' + $inf.Count)
           foreach ($item in $inf) {
-            Write-Host ('INF_FILE=' + $item.FullName)
-            $cat = @(Get-ChildItem -Path $item.DirectoryName -Filter '*.cat' -File)
-            foreach ($c in $cat) {
-              $catSig = Get-AuthenticodeSignature -LiteralPath $c.FullName
-              Write-Host ('CAT_FILE=' + $c.Name + ';STATUS=' + $catSig.Status + ';SUBJECT=' + $catSig.SignerCertificate.Subject)
+            Write-Host ('INF_RELATIVE=' + $item.FullName.Substring($dest.Length+1))
+            $cats = @(Get-ChildItem -LiteralPath $item.DirectoryName -Filter '*.cat' -File)
+            if ($cats.Count -ne 1) { throw "Expected one CAT adjacent to INF; got $($cats.Count)" }
+            foreach ($cat in $cats) {
+              $catSig = Get-AuthenticodeSignature -LiteralPath $cat.FullName
+              Write-Host ('CAT=' + $cat.Name + ';CAT_STATUS=' + $catSig.Status + ';CAT_SIGNER=' + $catSig.SignerCertificate.Subject)
               if ($catSig.Status -ne 'Valid') { throw 'EPSON_CAT_INVALID' }
             }
-            Get-Content -LiteralPath $item.FullName | Select-String -Pattern 'Universal|^(\s*\[Strings|\s*\[Manufacturer)|PCL6|ESC/P-R' |
-              Select-Object -First 90 | ForEach-Object { Write-Host ('DRIVER_INF_LINE=' + $_.Line.Trim()) }
+            $lines = Get-Content -LiteralPath $item.FullName
+            $lines | Select-String -Pattern 'Universal|^\s*\[(Strings|Manufacturer)|PCL6|ESC/P-R|EPSON' |
+              Select-Object -First 120 | ForEach-Object { Write-Host ('INF_LINE=' + $_.Line.Trim()) }
+            Write-Host ('INF_SHA256=' + (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash)
           }
-          Write-Host 'INSPECT_FINISHED: no software installed, no vendor binaries published.'
+          Write-Host 'INSPECTION_DONE: no Epson software executed, installed or published.'
