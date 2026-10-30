@@ -209,6 +209,9 @@ namespace BewustICT {
 $before = [BewustICT.PrinterTrayNative]::ReadGlobalSource($PrinterNaam)
 Write-Host ("TRAY_BEFORE_GLOBAL_RAWKIND={0}" -f $before)
 if ($Actie -eq 'Controleren') {
+    if ($before -ne [int]$target.RawKind) {
+        throw "TRAY_READONLY_MISMATCH: $PrinterNaam current=$before expected=$($target.RawKind)."
+    }
     Write-Host "TRAY_READONLY_OK: $PrinterNaam; desired=$($target.RawKind); current=$before"
     exit 0
 }
