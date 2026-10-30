@@ -2,6 +2,7 @@ name: Epson UPD - echte offline driverinstallatie (tijdelijke Windows-runner)
 on:
   push:
     paths:
+      - 'scripts/Test-EpsonUPD-Offline.ps1'
       - '.github/workflows/epson-driver-install-test.yml'
   workflow_dispatch:
 permissions:
@@ -12,10 +13,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Driver-only validatie, geen printerdetectie
+      - name: Controleer Epson-driverinstallatie zonder printer
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
           & .\scripts\Test-EpsonUPD-Offline.ps1 -Actie DriverOnly
-          if ($LASTEXITCODE -ne 0) { throw "Epson driverinstallatie faalde: exitcode $LASTEXITCODE" }
+          if (-not $?) { throw 'Epson driverinstallatiescript gaf een fout.' }
           $driver = Get-PrinterDriver -Name 'EPSON Universal Print Driver' -ErrorAction Stop
           Write-Host ("EPSON_DRIVER_GITHUB_VALIDATED=" + $driver.Name)
