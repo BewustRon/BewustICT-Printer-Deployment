@@ -65,3 +65,7 @@ Nieuwe driverpakketten uitsluitend na review en een gecontroleerde pilot. Beheer
 ## Herkomst en security
 
 De catalogus op `main` is een veranderlijke bron. Changes aan drivergoedkeuringen moeten via review lopen. Clients accepteren alleen downloadpakketten waarvan de volledige ZIP SHA256 overeenkomt met het catalogusrecord en de CAT-handtekening geldig is. Catalogusvalidatie en PowerShell-parser draaien via GitHub Actions; dit zijn statische controles, geen Windows 11-printerpilot.
+
+## Driverbronnencontrole 30-10-2026
+
+Zie [gecontroleerde fabrikantbronnen en rechten](docs/Driver-bronnen-2026-10-30.md). De catalogus bevat nu de officieel onderzochte versiekandidaten en beperkingen; alle zes records blijven bewust pending. Epson en Canon staan geen openbare herdistributie toe zonder passende toestemming. De centrale deployment kan bij een eerste pilot wel een al lokaal geinstalleerde driver gebruiken via de optionele NinjaOne-variabele driverNaam. **Dit is nog geen automatische driverdeployment.**
