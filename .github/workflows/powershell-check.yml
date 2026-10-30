@@ -8,19 +8,24 @@ on:
     paths:
       - 'scripts/**'
       - '.github/workflows/powershell-check.yml'
+permissions:
+  contents: read
 jobs:
   parse:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Controleer Windows PowerShell 5.1 syntax
+      - name: Controleer alle PowerShell scripts op syntaxfouten
         shell: powershell
         run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/Deploy-BewustICTPrinter.ps1').Path, [ref]$tokens, [ref]$errors)
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Host $_.ToString() }
-            exit 1
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem -Path 'scripts' -Filter '*.ps1' -File | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host $_.ToString() }
+              throw "Parserfout in $($_.Name)"
+            }
+            Write-Host "SYNTAX_OK: $($_.Name)"
           }
-          Write-Host 'OK: Windows PowerShell 5.1 syntax gecontroleerd'
