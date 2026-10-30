@@ -27,3 +27,15 @@ jobs:
             Write-Host ('EPSON_QUEUE_CI_OK=' + $name + ';Driver=' + $printer.DriverName + ';Port=' + $port.Name)
           }
           Write-Host 'EPSON_ALL_THREE_QUEUES_VERIFIED'
+      - name: Read-only inspectie papierladeopties van Epson Universal Print Driver
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $names = @('BIC EPSON PILOT - Blanco Kleur', 'BIC EPSON PILOT - Blanco Zwart Wit', 'BIC EPSON PILOT - CMR')
+          foreach ($name in $names) {
+            Write-Host ('=== PRINTCAPABILITIES START: ' + $name + ' ===')
+            & .\scripts\Inspect-BewustICTPrinter.ps1 -PrinterNaam $name
+            if (-not $?) { throw "Read-only printerdiagnose mislukt: $name" }
+            Write-Host ('=== PRINTCAPABILITIES END: ' + $name + ' ===')
+          }
+          Write-Host 'EPSON_TRAY_INSPECTION_FINISHED: driveropties uitgelezen; er zijn geen printerinstellingen gewijzigd.'
