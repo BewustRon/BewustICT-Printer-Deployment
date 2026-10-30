@@ -1,4 +1,4 @@
-# Bewust ICT - Centrale Printerdeployment (v0.5.1-PILOT)
+# Bewust ICT - Centrale Printerdeployment (v0.6.0-PILOT)
 
 **Repository:** https://github.com/BewustRon/BewustICT-Printer-Deployment
 
@@ -69,3 +69,12 @@ De catalogus op `main` is een veranderlijke bron. Changes aan drivergoedkeuringe
 ## Driverbronnencontrole 30-10-2026
 
 Zie [gecontroleerde fabrikantbronnen en rechten](docs/Driver-bronnen-2026-10-30.md). De catalogus bevat nu de officieel onderzochte versiekandidaten en beperkingen; alle zes records blijven bewust pending. Epson en Canon staan geen openbare herdistributie toe zonder passende toestemming. De centrale deployment kan bij een eerste pilot wel een al lokaal geinstalleerde driver gebruiken via de optionele NinjaOne-variabele driverNaam. **Dit is nog geen automatische driverdeployment.**
+
+## Offline proef zonder printer (v0.6.0)
+Selecteer in dezelfde NinjaOne-automation \`Actie = Offline testen\`, draai als SYSTEM onder 64-bit Windows PowerShell. De test maakt drie **BIC TEST**-queues op **192.0.2.50 (TEST-NET-1)** aan met een lokaal beschikbare generieke Windows-driver. Hij gebruikt dezelfde \`Ensure-TcpPrinterPort\` en \`Ensure-ManagedPrinterQueue\` functies als reguliere productie-installatie.
+
+**Wel getest bij succes:** aanmaken/controle van de poort en drie Windows-queues zonder verbinding met een printer. **Niet getest:** Epson UPD-download, realistische kleur, duplex, Cassette 1/2 en fysiek afdrukken. Daarvoor is fabrikantdriver + printer nodig.
+
+\`Actie = Test opruimen\` verwijdert alleen gemarkeerde BIC TEST-queues en een ongebruikte testpoort. Geen bestaande printers of defaultprintervoorkeur worden gewijzigd. Zie [NinjaOne stappen](docs/NinjaOne.md).
+
+Systeemvereiste: er moet een bruikbare Windows-testdriver aanwezig/te installeren zijn, en Print Spooler moet actief zijn. Het script wijzigt geen beveiligingsbeleid om dit af te dwingen.

@@ -7,6 +7,10 @@
   printer nog niet bereikbaar is. Gebruikt een exact vooraf geinstalleerde
   driver of een goedgekeurd INF-driverpakket uit een HTTPS-drivercatalogus.
 
+  OFFLINE TEST: Actie='Offline testen' maakt drie veilige BIC TEST-queues aan
+  op het gereserveerde IP 192.0.2.50 met een Windows-testdriver.
+  Actie='Test opruimen' verwijdert alleen die gemarkeerde testqueues.
+
   PILOT: niet gevalideerd op Windows/NinjaOne; geen productie-uitrol voordat
   drivernaam, fysieke lades en afdrukken per model zijn getest.
 
@@ -33,7 +37,7 @@ param(
     [string]$InstellenAlsStandaardprinter = 'false'
 )
 $ErrorActionPreference = 'Stop'
-$Version = '0.5.1-PILOT'
+$Version = '0.6.0-PILOT'
 $Root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment'
 $LogDir = Join-Path $Root 'Logs'
 $PkgDir = Join-Path $Root 'DriverPackages'
@@ -90,6 +94,132 @@ function Get-ConfigRetry {
         catch { if ($Attempt -eq 5) { throw }; Start-Sleep -Seconds 2 }
     }
 }
+
+# Dezelfde offline Windows-queuefuncties worden voor pilot en productie gebruikt.
+function Ensure-TcpPrinterPort {
+    param([string]$Name,[string]$IpAddress)
+    $ExistingPort = Get-PrinterPort -Name $Name -ErrorAction SilentlyContinue
+    if (-not $ExistingPort) {
+        Add-PrinterPort -Name $Name -PrinterHostAddress $IpAddress -PortNumber 9100 -ErrorAction Stop
+        Write-Log "Windows Standard TCP/IP-poort '$Name' aangemaakt, zonder netwerkverzoek."
+        $ExistingPort = Get-PrinterPort -Name $Name -ErrorAction Stop
+    }
+    if ([string]$ExistingPort.PrinterHostAddress -ne $IpAddress) {
+        throw "Poort '$Name' verwijst naar '$($ExistingPort.PrinterHostAddress)', verwacht '$IpAddress'."
+    }
+    if ($null -ne $ExistingPort.PortNumber -and [string]$ExistingPort.PortNumber -and [int]$ExistingPort.PortNumber -ne 9100) {
+        throw "Poort '$Name' gebruikt niet TCP/9100."
+    }
+    return $ExistingPort
+}
+function Ensure-ManagedPrinterQueue {
+    param(
+        [string]$Name,[string]$Driver,[string]$PortName,
+        [string]$Comment,[string]$AllowedMarker
+    )
+    $Current = Get-PrinterSafe -Name $Name
+    if ($Current) {
+        if (-not ([string]$Current.Comment).StartsWith($AllowedMarker,[StringComparison]::OrdinalIgnoreCase)) {
+            throw "Queue '$Name' bestaat al en is niet door deze automation gemarkeerd. Geen wijziging uitgevoerd."
+        }
+        if ($Current.DriverName -ne $Driver) {
+            Set-Printer -Name $Name -DriverName $Driver -ErrorAction Stop
+            Write-Log "Driver bijgewerkt voor '$Name'."
+        }
+        if ($Current.PortName -ne $PortName) {
+            Set-Printer -Name $Name -PortName $PortName -ErrorAction Stop
+            Write-Log "TCP/IP-poort bijgewerkt voor '$Name'."
+        }
+        if ([string]$Current.Comment -ne $Comment) {
+            Set-Printer -Name $Name -Comment $Comment -ErrorAction Stop
+        }
+    }
+    else {
+        Add-Printer -Name $Name -DriverName $Driver -PortName $PortName -Comment $Comment -ErrorAction Stop
+        Write-Log "Queue '$Name' toegevoegd zonder printerdetectie."
+    }
+    $Actual = Get-PrinterSafe -Name $Name
+    if (-not $Actual -or $Actual.DriverName -ne $Driver -or $Actual.PortName -ne $PortName -or
+        [string]$Actual.Comment -ne $Comment) {
+        throw "Verificatie mislukt voor printerqueue '$Name'."
+    }
+    return $Actual
+}
+function Invoke-OfflineQueueTest {
+    param([switch]$Cleanup)
+    # 192.0.2.0/24 is TEST-NET-1 (RFC 5737), geen klant- of printer-IP.
+    $TestIp = '192.0.2.50'
+    $TestPort = 'BIC_TCP_192.0.2.50_9100'
+    $TestMarker = 'BewustICT-TCP-TEST|192.0.2.50'
+    $TestMarkerPrefix = 'BewustICT-TCP-TEST|'
+    $Queues = @(
+        'BIC TEST - Blanco Kleur',
+        'BIC TEST - Blanco Zwart Wit',
+        'BIC TEST - CMR'
+    )
+    $Svc = Get-Service -Name Spooler -ErrorAction Stop
+    if ($Svc.Status -ne 'Running') {
+        throw "Windows Print Spooler draait niet (status=$($Svc.Status)); de automation wijzigt de serviceconfiguratie niet."
+    }
+    # Controleer eerst conflicten: raak GEEN bestaande, niet-beheerde queue aan.
+    foreach ($Name in $Queues) {
+        $Current = Get-PrinterSafe -Name $Name
+        if ($Current -and [string]$Current.Comment -ne $TestMarker) {
+            throw "TEST GESTOPT: '$Name' bestaat maar heeft niet de verwachte testmarker. Geen wijzigingen uitgevoerd."
+        }
+    }
+    if ($Cleanup) {
+        foreach ($Name in $Queues) {
+            if (Get-PrinterSafe -Name $Name) {
+                Remove-Printer -Name $Name -ErrorAction Stop
+                if (Get-PrinterSafe -Name $Name) { throw "Testqueue '$Name' is niet verwijderd." }
+                Write-Log "Testqueue '$Name' verwijderd."
+            }
+        }
+        $Port = Get-PrinterPort -Name $TestPort -ErrorAction SilentlyContinue
+        if ($Port) {
+            $InUse = @(Get-Printer | Where-Object { $_.PortName -eq $TestPort })
+            if ($InUse.Count -eq 0) {
+                Remove-PrinterPort -Name $TestPort -ErrorAction Stop
+                Write-Log "Ongebruikte testpoort '$TestPort' verwijderd."
+            }
+            else { Write-Log "Testpoort in gebruik door andere queue: behouden." 'WARN' }
+        }
+        Write-Log 'OFFLINE_TEST_CLEANUP_OK: de drie gemarkeerde testqueues zijn afwezig.'
+        return
+    }
+    $DriverCandidates = @('Generic / Text Only','Microsoft PCL6 Class Driver','Microsoft PS Class Driver')
+    $ChosenDriver = $null
+    foreach ($Candidate in $DriverCandidates) {
+        $InstalledDriver = Get-PrinterDriver -Name $Candidate -ErrorAction SilentlyContinue
+        if ($InstalledDriver) { $ChosenDriver = [string]$InstalledDriver.Name; break }
+    }
+    if (-not $ChosenDriver) {
+        try {
+            Add-PrinterDriver -Name 'Generic / Text Only' -ErrorAction Stop
+        }
+        catch {
+            Write-Log ("Windows kon de ingebouwde Generic / Text Only driver niet laden: " + $_.Exception.Message) 'WARN'
+        }
+        $InstalledDriver = Get-PrinterDriver -Name 'Generic / Text Only' -ErrorAction SilentlyContinue
+        if ($InstalledDriver) { $ChosenDriver = [string]$InstalledDriver.Name }
+    }
+    if (-not $ChosenDriver) {
+        $Available = @(Get-PrinterDriver | Select-Object -First 12 -ExpandProperty Name) -join ', '
+        throw "Geen bruikbare ingebouwde testdriver aanwezig. Beschikbare drivers: $Available. Stop zonder een queue aan te maken."
+    }
+    Write-Log "OFFLINE TEST: Windows-driver '$ChosenDriver', test-IP=$TestIp, 3 queues. Geen Epson-driver, kleur- of cassettevalidatie."
+    [void](Ensure-TcpPrinterPort -Name $TestPort -IpAddress $TestIp)
+    foreach ($Name in $Queues) {
+        [void](Ensure-ManagedPrinterQueue -Name $Name -Driver $ChosenDriver -PortName $TestPort -Comment $TestMarker -AllowedMarker $TestMarkerPrefix)
+        Write-Log "OFFLINE_TEST_QUEUE_OK: '$Name' bestaat op '$TestPort'."
+    }
+    if (@(Get-Printer | Where-Object { $_.PortName -eq $TestPort -and $_.Comment -eq $TestMarker }).Count -lt 3) {
+        throw 'Controle mislukt: minder dan drie gemarkeerde testprinters aangemaakt.'
+    }
+    Write-Log 'OFFLINE_TEST_OK: 3/3 testqueues aanwezig ZONDER bereikbare Epson. Dit test geen werkelijke kleur, duplex, papierlade of afdrukken.'
+}
+
 function Get-SafeChildPath {
     param([string]$Base,[string]$Relative)
     if ([string]::IsNullOrWhiteSpace($Relative) -or [IO.Path]::IsPathRooted($Relative)) {
@@ -186,7 +316,8 @@ function Install-ApprovedDriver {
 }
 function Get-CassetteMatches {
     param([string]$Name,[int]$Number)
-    Add-Type -AssemblyName System.Printing -ErrorAction Stop
+    try { Add-Type -AssemblyName ReachFramework -ErrorAction Stop }
+    catch { Add-Type -AssemblyName System.Printing -ErrorAction Stop }
     $Server = New-Object System.Printing.LocalPrintServer
     $Queue = $null
     $Stream = $null
@@ -352,7 +483,22 @@ try {
         {$_ -in @('Installeren','Install')} {'Install'}
         {$_ -in @('Controleren','Inspect')} {'Inspect'}
         {$_ -in @('Verwijderen','Remove')} {'Remove'}
+        {$_ -in @('Offline testen','OfflineTest')} {'OfflineTest'}
+        {$_ -in @('Test opruimen','OfflineCleanup')} {'OfflineCleanup'}
         default { throw "Ongeldige actie '$Actie'." }
+    }
+    # Offline test negeert andere NinjaOne-velden en raakt geen productiequeue aan.
+    if ($Mode -in @('OfflineTest','OfflineCleanup')) {
+        if (-not [Environment]::Is64BitProcess) { throw 'Windows PowerShell 64-bit is verplicht.' }
+        $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $Admin = New-Object Security.Principal.WindowsPrincipal($Identity)
+        if (-not $Admin.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'Run as SYSTEM of Administrator is vereist.'
+        }
+        Import-Module PrintManagement -ErrorAction Stop
+        Write-Log "Bewust ICT printerdeployment $Version - $Mode"
+        Invoke-OfflineQueueTest -Cleanup:($Mode -eq 'OfflineCleanup')
+        exit 0
     }
     if ([string]::IsNullOrWhiteSpace($PrinterNaam) -or $PrinterNaam.Length -gt 180 -or $PrinterNaam -match '[\r\n\*\?\[\]]') {
         throw 'Vul een geldige printernaam in (maximaal 180 tekens).'
@@ -411,33 +557,9 @@ try {
         $ResolvedDriverName = Install-ApprovedDriver -Brand $PrinterMerk -CatalogUrl $DriverCatalogusUrl
     }
     $PortName = 'BIC_TCP_{0}_9100' -f $PrinterIpAdres
-    $CurrentPort = Get-PrinterPort -Name $PortName -ErrorAction SilentlyContinue
-    if (-not $CurrentPort) {
-        Add-PrinterPort -Name $PortName -PrinterHostAddress $PrinterIpAdres -PortNumber 9100 -ErrorAction Stop
-        Write-Log "Standard TCP/IP-port '$PortName' aangemaakt (geen netwerktest)."
-    } else {
-        if ($CurrentPort.PrinterHostAddress -and ([string]$CurrentPort.PrinterHostAddress) -ne $PrinterIpAdres) {
-            throw "Bestaande poort '$PortName' verwijst naar ander IP."
-        }
-    }
+    [void](Ensure-TcpPrinterPort -Name $PortName -IpAddress $PrinterIpAdres)
     $ExpectedMarker = "$MarkerPrefix$PrinterMerk"
-    if ($Existing) {
-        if (-not ([string]$Existing.Comment).StartsWith($MarkerPrefix,[StringComparison]::OrdinalIgnoreCase)) {
-            throw "Printer '$PrinterNaam' bestaat al, maar is niet door deze TCP-automation beheerd. Wijzigingen geweigerd."
-        }
-        if ($Existing.DriverName -ne $ResolvedDriverName) {
-            Set-Printer -Name $PrinterNaam -DriverName $ResolvedDriverName -ErrorAction Stop
-            Write-Log "Driver gewijzigd naar '$ResolvedDriverName'."
-        }
-        if ($Existing.PortName -ne $PortName) {
-            Set-Printer -Name $PrinterNaam -PortName $PortName -ErrorAction Stop
-            Write-Log "Bestaande queue gekoppeld aan nieuw IP $PrinterIpAdres."
-        }
-        Set-Printer -Name $PrinterNaam -Comment $ExpectedMarker -ErrorAction Stop
-    } else {
-        Add-Printer -Name $PrinterNaam -DriverName $ResolvedDriverName -PortName $PortName -Comment $ExpectedMarker -ErrorAction Stop
-        Write-Log "Printerqueue '$PrinterNaam' aangemaakt zonder dat de printer online is."
-    }
+    [void](Ensure-ManagedPrinterQueue -Name $PrinterNaam -Driver $ResolvedDriverName -PortName $PortName -Comment $ExpectedMarker -AllowedMarker $MarkerPrefix)
     $Before = Get-ConfigRetry $PrinterNaam
     if ($Before.Color -ne $Color -or [string]$Before.DuplexingMode -ne $Duplex -or [string]$Before.PaperSize -ne $Papierformaat) {
         Set-PrintConfiguration -PrinterName $PrinterNaam -Color ([bool]$Color) -DuplexingMode $Duplex -PaperSize $Papierformaat -ErrorAction Stop
