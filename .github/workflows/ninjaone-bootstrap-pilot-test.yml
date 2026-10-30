@@ -1,0 +1,35 @@
+name: NinjaOne launcher v0.8 integrity and Epson offline pilot
+on:
+  push:
+    paths:
+      - '.github/workflows/ninjaone-bootstrap-pilot-test.yml'
+      - 'scripts/NinjaOne-Printer-Bootstrap.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pilot:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launcher als NinjaOne SYSTEM-equivalent testen met scriptvariabelen
+        shell: powershell
+        env:
+          actie: Installeren
+          printerNaam: BIC NINJA CI - Blanco Kleur
+          printerIpAdres: 192.0.2.50
+          printerMerk: Epson
+          kleurAfdrukken: Kleur
+          dubbelzijdigAfdrukken: Uit
+          papierformaat: A4
+          papierlade: Cassette 2
+          instellenAlsStandaardprinter: 'false'
+        run: |
+          & .\scripts\NinjaOne-Printer-Bootstrap.ps1
+          if (-not $?) { throw 'NinjaOne bootstrap returned failure' }
+          $p=Get-Printer -Name 'BIC NINJA CI - Blanco Kleur' -ErrorAction Stop
+          if ($p.DriverName -ne 'EPSON Universal Print Driver') { throw 'Epson driver mismatch' }
+          $c=Get-PrintConfiguration -PrinterName $p.Name -ErrorAction Stop
+          if (-not $c.Color -or [string]$c.PaperSize -ne 'A4') { throw 'Color or format mismatch' }
+          Write-Host 'NINJAONE_BOOTSTRAP_CI_OK'
