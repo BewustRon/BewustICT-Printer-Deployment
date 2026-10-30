@@ -84,3 +84,18 @@ Systeemvereiste: er moet een bruikbare Windows-testdriver aanwezig/te installere
 **PASS (door gebruiker bevestigd met Windows Instellingen-screenshots):** de drie testqueues `BIC TEST - Blanco Kleur`, `BIC TEST - Blanco Zwart Wit` en `BIC TEST - CMR` zijn zichtbaar op de eigen Windows-pc zonder toegang tot het echte Epson-IP. Bij `BIC TEST - CMR` is driver `Generic / Text Only` zichtbaar en printerstatus `Niet-actief` is voor een offline test verwacht. **Bewijsomvang:** Windows kan drie printqueues vooraf registreren zonder netwerkverbinding naar de printer. Screenshots bewijzen geen werkelijke afdruk, Epson UPD, kleurfidelity, duplex, fysieke lade of aanwezigheid van Epson-software. De OEM-driverinstallatie blijft de volgende open technische stap.
 
 **Epson bron:** https://epson.com/Support/Printers/All-In-Ones/WorkForce-Series/Epson-WorkForce-Enterprise-WF-C20600/s/SPT_C11CH86201?review-filter=Windows+11 . De Epson website levert `EUPD_x64_212200.exe` (v2.122.00) voor geschikte systemen. De gewone installatiewizard verwacht printerdetectie (zie https://files.support.epson.com/docid/cpd5/cpd56747/source/printers/source/printing_software/windows_fy13/tasks/installing_printer_universal.html ); voor onbereikbare printers moet eerst de echte en ondertekende INF/CAT vanuit het legitieme, geverifieerde OEM-pakket *offline* worden gestaged. Zolang die download, pakketinhoud, stille installatie en versiepinning niet geverifieerd zijn, blijft de catalogus `pending`. Geen derde-partij-download of onbewezen EXE-parameters gebruiken.
+
+## Windows CI: drie echte Epson queues offline geslaagd (30-10-2026)
+
+Bron: https://github.com/BewustRon/BewustICT-Printer-Deployment/actions/runs/41052426414 (GitHub Actions Windows Server 2025, SUCCESS). `scripts/Test-EpsonUPD-Offline.ps1 -Actie Installeren -PrinterIpAdres 192.0.2.50` heeft de ondertekende Epson Universal Print Driver v2.122.00 gedownload, gevalideerd, geinstalleerd en drie queues zonder printercontact aangemaakt.
+
+- `BIC EPSON PILOT - Blanco Kleur` -> Color=True, Duplex=OneSided, A4, Epson Universal Print Driver.
+- `BIC EPSON PILOT - Blanco Zwart Wit` -> Color=False, Duplex=OneSided, A4, Epson Universal Print Driver.
+- `BIC EPSON PILOT - CMR` -> Color=False, Duplex=OneSided, A4, Epson Universal Print Driver.
+- Alle drie via de `BIC_EPSON_PILOT_192.0.2.50_9100` TCP/IP-poort; CI eindigde met `EPSON_ALL_THREE_QUEUES_VERIFIED`.
+
+**Grenzen:** Windows-driverregistratie en queueconfiguratie wel bewezen; cassette 1/2 en een fysieke testafdruk nog niet. Dit is een aparte Epson PILOT, nog niet de definitieve generieke catalogus voor zes merken. Bestaande printers blijven ongemoeid.
+
+### Uitvoeren op een eigen pilot-pc
+
+Open `scripts/Test-EpsonUPD-Offline.ps1` via een immutable commit-ref in de raw GitHub URL. Voer met 64-bit Windows PowerShell als Administrator/SYSTEM uit, `-Actie Installeren -PrinterIpAdres 192.168.53.50`. Gebruik `-Actie Verwijderen` om alleen de drie gemarkeerde Epson-pilotqueues te verwijderen; de driver blijft behouden. De oude `BIC TEST - ...`-queues uit de generieke test zijn hier bewust onafhankelijk van.
