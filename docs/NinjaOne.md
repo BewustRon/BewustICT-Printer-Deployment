@@ -1,43 +1,53 @@
-# NinjaOne variabelen - Bewust ICT v0.6.0 PILOT
+# NinjaOne printerautomation - v0.8.0 PILOT
 
-De waarde in de kolom **Calculated name** moet exact aansluiten op de naam die NinjaOne aan het script doorgeeft. Verwijder oude `bi*` variabelen en de drie-profielenvariabelen uit v0.3.0. Geen losse PowerShell Parameters instellen. Uitvoeren als **SYSTEM / Windows PowerShell 64-bit**.
+**Gebruik een enkele NinjaOne PowerShell automation.** Plak de launcher uit [scripts/NinjaOne-Printer-Bootstrap.ps1](../scripts/NinjaOne-Printer-Bootstrap.ps1) in het scriptveld. De launcher downloadt de vastgepinde, SHA256-gecontroleerde centrale PowerShell-code. Voer uit onder **Windows PowerShell 5.1 x64**, **Run as System**. Niet automatisch op alle klanten uitrollen voor de pilot is afgerond.
 
-| Zichtbare naam | Calculated name | Type | Opties of voorbeeld |
+## Script variables in NinjaOne
+
+De **Calculated name** moet exact overeenkomen met onderstaande kolom. Verwijder de oude variabelen `biPrinterName`, `biPrinterIP`, `biColorMode`, `biDuplexMode`, `biPaperSize`, `biPaperTray`, `biAction`, `biSetDefaultPrinter` voordat je deze automation test. De variabelen worden als omgevingsvariabelen doorgegeven; de centrale code leest ze uit.
+
+| Label | Calculated name | Type | Instellingen |
 |---|---|---|---|
-| Actie | `actie` | Dropdown | `Controleren` (default), `Installeren`, `Verwijderen`, `Offline testen`, `Test opruimen` |
-| Printer naam | `printerNaam` | Tekst | `Blanco Kleur` |
-| Printer IP adres | `printerIpAdres` | IP Address | `192.168.53.50` |
+| Actie | `actie` | Dropdown | `Controleren`, `Installeren`, `Verwijderen`, `Offline testen`, `Test opruimen` |
+| Printer naam | `printerNaam` | String/Text | Vrij invulveld |
+| Printer IP adres | `printerIpAdres` | IP address | Vrij invulveld |
 | Printer merk | `printerMerk` | Dropdown | `HP`, `Epson`, `Canon`, `Kyocera`, `Ricoh`, `Brother` |
-| Driver naam (optioneel) | `driverNaam` | Tekst | exact naam die `Get-PrinterDriver` toont; alleen voor reeds geïnstalleerde drivers |
-| Driver catalogus URL (optioneel) | `driverCatalogusUrl` | Tekst | optioneel; centrale GitHub-catalogus is al in het script ingesteld |
-| Kleur afdrukken | `kleurAfdrukken` | Dropdown | `Zwart-wit` (default), `Kleur` |
-| Dubbelzijdig afdrukken | `dubbelzijdigAfdrukken` | Dropdown | `Uit` (default), `Lange zijde`, `Korte zijde` |
-| Papierformaat | `papierformaat` | Dropdown | `A4` (default), `A3`, `A5` |
-| Papierlade | `papierlade` | Dropdown | `Automatisch` (default), `Cassette 1`, `Cassette 2`, `Cassette 3`, `Cassette 4` |
-| Instellen als standaardprinter | `instellenAlsStandaardprinter` | Checkbox | uit (default) of aan |
+| Kleur afdrukken | `kleurAfdrukken` | Dropdown | `Zwart-wit`, `Kleur` |
+| Dubbelzijdig afdrukken | `dubbelzijdigAfdrukken` | Dropdown | `Uit`, `Lange zijde`, `Korte zijde` |
+| Papierformaat | `papierformaat` | Dropdown | `A4`, `A3`, `A5` |
+| Papierlade | `papierlade` | Dropdown | `Automatisch`, `Cassette 1`, `Cassette 2`, `Cassette 3`, `Cassette 4` |
+| Standaardprinter | `instellenAlsStandaardprinter` | Checkbox | Standaard uit |
+| Driver naam (optioneel) | `driverNaam` | String/Text | Leeg voor automatische Epson-driverinstallatie; alleen invullen bij al lokaal geinstalleerde driver |
 
-Bij Installeren: gebruik `driverNaam` **of** een goedgekeurd merkrecord uit de automatisch ingestelde centrale catalogus. Zonder een van beide stopt de installatie bewust voordat er een queue wordt aangepast. De checkbox zet de standaardprinter bij de volgende gebruikersaanmelding; uitgevinkt wijzigt de bestaande voorkeur niet.
+**Geen Parameters invullen.** `driverCatalogusUrl` hoeft niet als variabele te worden aangemaakt: de centrale code kent de GitHub-URL.
 
-De drivercatalogus is voorlopig volledig `pending`. De URL **is al in het script ingevuld**: `https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/main/catalog/drivers.json`. Laat de optionele NinjaOne-variabele `driverCatalogusUrl` leeg, of maak die helemaal niet aan.
+## Eerste test vanaf eigen pc met NinjaOne
 
-## Epson pilot
+- **Actie:** Installeren
+- **Printer naam:** `BIC NINJA PILOT - Blanco Kleur`
+- **Printer IP adres:** `192.0.2.50` (gereserveerd testadres; hoeft niet bereikbaar te zijn)
+- **Printer merk:** Epson
+- **Kleur afdrukken:** Kleur
+- **Dubbelzijdig afdrukken:** Uit
+- **Papierformaat:** A4
+- **Papierlade:** Cassette 2
+- **Standaardprinter:** uit
+- **Driver naam:** leeg
 
-1. Installeer de officieel gedownloade en gecontroleerde Epson UPD op de testwerkplek, bijvoorbeeld met PnPUtil en Add-PrinterDriver volgens fabrikantdocumentatie.
-2. Lees de **exacte** Windows-drivernaam met `Get-PrinterDriver | Select-Object Name`.
-3. Vul die naam in bij `Driver naam (optioneel)`; selecteer `Epson`; gebruik de 3 queue-instellingen uit de README.
-4. Test de cassetteconfiguratie op fysieke output; alleen Windows-configuratie is onvoldoende bewijs.
-## Offline testen vanaf je eigen PC - zonder Epson
-Dezelfde automation kan de **echte Windows Standard TCP/IP-poort + Add-Printer-code** testen zonder Epson-driver of Epson-netwerk. Kies bij Actie \`Offline testen\`. Andere NinjaOne-velden worden genegeerd; je hoeft niets in te vullen.
+Selecteer het **eigen testapparaat**, niet een klantorganisatie, en voer de automation **handmatig** uit. Succes is `NINJAONE_PRINTER_AUTOMATION_OK` en een nieuwe queue met de juiste Epson-driver en Cassette 2. De eerder gemaakte BIC V08-printers blijven ongemoeid.
 
-Het script gebruikt **192.0.2.50** (gereserveerd test-IP) en maakt drie queues aan:
-- \`BIC TEST - Blanco Kleur\`
-- \`BIC TEST - Blanco Zwart Wit\`
-- \`BIC TEST - CMR\`
+Elke printerqueue vergt een eigen run met ingevulde variabelen; de Epson-klantpilot heeft drie queues, maar er is slechts **een script**.
 
-Dit is alleen een **queue/poort-installatietest** met een reeds aanwezige ingebouwde Windows-driver (Generic / Text Only, Microsoft PCL6 Class Driver of Microsoft PS Class Driver). Er wordt geen fabrikantdriver gedownload of gesimuleerd. Als de ingebouwde driver niet beschikbaar is, wordt de test afgebroken met een duidelijke melding.
+## Werking en beperkingen
 
-Verwacht in de NinjaOne-uitvoer de regel \`OFFLINE_TEST_OK: 3/3\`. Controleer desgewenst de drie namen onder Windows **Printers en scanners**. Een tweede run is veilig (idempotent). Dit **bewijst niet** dat de Epson UPD, kleur, duplex, Cassette 1/2 of de fysieke afdruk werkt.
+- Epson Universal Print Driver v2.122.00 wordt, indien ontbrekend, direct van `ftp.epson.com` opgehaald en gecontroleerd op SHA256 en Authenticode. Epson is offline getest op Windows GitHub Actions en op de eigen engineer-pc.
+- Printerqueues worden via Standard TCP/IP met RAW 9100 aangemaakt zonder ping of discovery.
+- Papierlade wordt via een vastgepinde helper op de Windows-spooler geconfigureerd en opnieuw gecontroleerd.
+- Voor HP, Canon, Kyocera, Ricoh, Brother staat de drivercatalogus nog op `pending`; zonder al vooraf geinstalleerde geschikte driver stopt het script.
+- Dit is een **PILOT**: printermodelcompatibiliteit, daadwerkelijke fysieke afdruk en uitrol via NinjaOne zijn nog te bevestigen. Automatische standaardprinter via gebruikersaanmelding is ook nog niet gevalideerd in de pilot.
+- Opslaan van het uitrolscript als lokale NinjaOne-automation maakt de scriptversie vast. Nieuwe commits naar GitHub wijzigen de bestaande launcher niet automatisch.
 
-Opruimen: kies \`Test opruimen\`; alleen testqueues met onze unieke marker worden verwijderd. De bestaande standaardprinter blijft onaangeroerd.
+## Uitgebreide bewijzen
 
-Voor een proef zonder nieuwe NinjaOne-variabelen is er ook een korte, afzonderlijke NinjaOne PowerShell-runner in \`scripts/Run-OfflineTest-NinjaOne.ps1\` beschikbaar.
+- [Integratietest op GitHub (volledig Epson, 3 queues)](https://github.com/BewustRon/BewustICT-Printer-Deployment/actions/runs/41069887307)
+- De eigen Windows PowerShell-run bevestigde `CASSETTE_CONFIRMED` en `SUCCESS` voor de 3 Epson-queues.
