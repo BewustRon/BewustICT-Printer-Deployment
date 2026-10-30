@@ -76,7 +76,7 @@ function Check-Authenticode {
     $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
     $subject = [string]$signature.SignerCertificate.Subject
     if ($signature.Status -ne 'Valid' -or $subject -notmatch $SubjectPattern) {
-        throw "Handtekening ongeldig voor $Label: $($signature.Status); subject='$subject'."
+        throw "Handtekening ongeldig voor ${Label}: $($signature.Status); subject='$subject'."
     }
     Write-Log "$Label authenticode OK: $subject"
 }
