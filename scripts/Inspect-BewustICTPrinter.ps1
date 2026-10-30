@@ -1,60 +1,90 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
- Read-only printerdriver en print-lade diagnose voor Bewust ICT.
+  Bewust ICT - READ-ONLY diagnose papierladen van een lokale Windows-printerqueue.
+.DESCRIPTION
+  Leest via System.Drawing.Printing.PrinterSettings de drivergerapporteerde
+  papierbronnen en hun RawKind-IDs uit. Er hoeft GEEN printer online te zijn.
+  De waarde van SourceName komt van de printerdriver; hiermee is niet bewezen
+  dat de fysieke printer de lade ook daadwerkelijk heeft.
 .NOTES
- Windows PowerShell 5.1 (64-bit). Wijzigt geen printerconfiguratie.
+  Windows PowerShell 5.1 x64; uitvoeren onder Administrator/SYSTEM.
+  Als de driver geen bronnen aanbiedt, eindigt dit script met een fout,
+  niet met een onterechte successmelding.
 #>
 [CmdletBinding()]
-param([string]$PrinterNaam = '')
-
-$ErrorActionPreference='Stop'
+param(
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$PrinterNaam
+)
+$ErrorActionPreference = 'Stop'
 Import-Module PrintManagement -ErrorAction Stop
-$folder=Join-Path $env:ProgramData ('BewustICT\PrinterDeployment\Diagnostics\'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
-New-Item -Path $folder -ItemType Directory -Force | Out-Null
-Get-PrinterDriver | Select-Object Name,Manufacturer,PrinterEnvironment,MajorVersion |
-    Export-Csv (Join-Path $folder 'Drivers.csv') -NoTypeInformation -Encoding UTF8
-Get-Printer | Select-Object Name,DriverName,PortName,Comment |
-    Export-Csv (Join-Path $folder 'Printers.csv') -NoTypeInformation -Encoding UTF8
-Write-Output "Resultaten: $folder"
-if (-not $PrinterNaam) {
-    Write-Output 'Geef -PrinterNaam op voor een specifieke queue en papierladen.'
-    exit 0
+$printer = Get-Printer -Name $PrinterNaam -ErrorAction Stop
+$configuration = Get-PrintConfiguration -PrinterName $PrinterNaam -ErrorAction Stop
+$root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment\Diagnostics'
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+$safeName = $PrinterNaam -replace '[^A-Za-z0-9_.-]', '_'
+$folder = Join-Path $root ($stamp + '-' + $safeName)
+New-Item -Path $folder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+
+Write-Output ("PRINTER_INFO Name='{0}'; Driver='{1}'; Port='{2}'; Kleur={3}; Duplex={4}; Papier={5}" -f
+    $printer.Name,$printer.DriverName,$printer.PortName,$configuration.Color,
+    $configuration.DuplexingMode,$configuration.PaperSize)
+
+# Geen WPF ReachFramework/System.Printing nodig; werkt ook zonder de printer online.
+Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+$settings = New-Object System.Drawing.Printing.PrinterSettings
+$settings.PrinterName = $PrinterNaam
+if (-not $settings.IsValid) {
+    throw "PrinterSettings heeft '$PrinterNaam' als ongeldige queue gemeld."
 }
-$p=Get-Printer -Name $PrinterNaam -ErrorAction Stop
-$c=Get-PrintConfiguration -PrinterName $PrinterNaam -ErrorAction Stop
-Write-Output ("Queue={0}; Driver={1}; Port={2}; Color={3}; Duplex={4}; Paper={5}" -f $p.Name,$p.DriverName,$p.PortName,$c.Color,$c.DuplexingMode,$c.PaperSize)
-if ($c.PrintTicketXml) {
-    [IO.File]::WriteAllText((Join-Path $folder 'PrintTicket.xml'),[string]$c.PrintTicketXml,[Text.Encoding]::UTF8)
+
+$sources = New-Object 'System.Collections.Generic.List[object]'
+foreach ($source in $settings.PaperSources) {
+    $sources.Add([pscustomobject]@{
+        SourceName = [string]$source.SourceName
+        RawKind = [int]$source.RawKind
+        Kind = [string]$source.Kind
+    })
+}
+if ($sources.Count -lt 1) {
+    throw "TRAYS_NOT_AVAILABLE: driver '$($printer.DriverName)' rapporteert geen papierbronnen."
+}
+$csvPath = Join-Path $folder 'Papierladen.csv'
+$sources | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+Write-Output ("PAPER_SOURCES_COUNT={0}" -f $sources.Count)
+foreach ($source in $sources) {
+    Write-Output ("PAPER_SOURCE Name='{0}' RawKind={1} Kind='{2}'" -f $source.SourceName,$source.RawKind,$source.Kind)
 }
 try {
-    try { Add-Type -AssemblyName ReachFramework -ErrorAction Stop }
-    catch { Add-Type -AssemblyName System.Printing -ErrorAction Stop }
-    $server=New-Object System.Printing.LocalPrintServer
-    try {
-        $queue=$server.GetPrintQueue($PrinterNaam)
-        try {
-            $stream=$queue.GetPrintCapabilitiesAsXml()
-            try {
-                $bytes=$stream.ToArray()
-                [IO.File]::WriteAllBytes((Join-Path $folder 'PrintCapabilities.xml'),$bytes)
-                [xml]$xml=[Text.Encoding]::UTF8.GetString($bytes)
-                $lines=@()
-                foreach($f in @($xml.SelectNodes("//*[local-name()='Feature' and contains(@name,'InputBin')]"))) {
-                    $lines+="Feature: "+$f.GetAttribute('name')
-                    foreach($o in @($f.SelectNodes("./*[local-name()='Option']"))) {
-                        $labels=@($o.GetAttribute('name'))
-                        $labels+=@($o.SelectNodes(".//*[local-name()='Property' and contains(@name,'DisplayName')]//*[local-name()='Value']")|ForEach-Object{$_.InnerText})
-                        $lines+="Option: "+($labels -join ' | ')
-                    }
-                }
-                $lines | Set-Content (Join-Path $folder 'Papierladen.txt') -Encoding UTF8
-                if ($lines.Count -eq 0) { Write-Warning 'Geen InputBin-features gevonden.' }
-                else { $lines | ForEach-Object { Write-Output $_ } }
-            } finally { if($stream){$stream.Dispose()} }
-        } finally { if($queue){$queue.Dispose()} }
-    } finally { if($server){$server.Dispose()} }
+    $defaultSource = $settings.DefaultPageSettings.PaperSource
+    if ($null -ne $defaultSource) {
+        Write-Output ("DRIVER_DEFAULT_PAPER_SOURCE Name='{0}' RawKind={1}" -f
+            $defaultSource.SourceName,$defaultSource.RawKind)
+    }
 } catch {
-    Write-Warning ("PrintCapabilities niet beschikbaar: "+$_.Exception.Message)
+    Write-Warning ('Standaardbron is niet opvraagbaar: ' + $_.Exception.Message)
 }
-Write-Output 'Read-only diagnose voltooid.'
+
+# PrintTicket is aanvullend informatief, zonder deze te wijzigen.
+$ticketString = [string]$configuration.PrintTicketXml
+if (-not [string]::IsNullOrWhiteSpace($ticketString)) {
+    $ticketPath = Join-Path $folder 'PrintTicket.xml'
+    [IO.File]::WriteAllText($ticketPath,$ticketString,[Text.Encoding]::UTF8)
+    try {
+        [xml]$ticket = $ticketString
+        $features = @($ticket.SelectNodes("//*[local-name()='Feature' and contains(@name,'InputBin')]"))
+        Write-Output ("PRINTTICKET_INPUTBIN_FEATURES={0}" -f $features.Count)
+        foreach ($feature in $features) {
+            $option = @($feature.SelectNodes("./*[local-name()='Option']"))
+            $names = @($option | ForEach-Object { $_.GetAttribute('name') })
+            Write-Output ("PRINTTICKET_INPUTBIN Feature='{0}' Options='{1}'" -f
+                $feature.GetAttribute('name'),($names -join ','))
+        }
+    } catch {
+        Write-Warning ('PrintTicket XML kon niet geinterpreteerd worden: '+$_.Exception.Message)
+    }
+}
+Write-Output ("PAPER_SOURCES_OK: driver heeft {0} papierbronnen teruggegeven." -f $sources.Count)
+Write-Output ("RESULTS_PATH={0}" -f $folder)
