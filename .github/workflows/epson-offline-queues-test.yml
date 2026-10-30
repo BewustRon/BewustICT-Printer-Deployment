@@ -1,0 +1,29 @@
+name: Epson UPD - drie offline printerqueues testen
+on:
+  push:
+    paths:
+      - '.github/workflows/epson-offline-queues-test.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installeer echte Epson UPD en 3 queues zonder printer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\scripts\Test-EpsonUPD-Offline.ps1 -Actie Installeren -PrinterIpAdres '192.0.2.50'
+          if (-not $?) { throw 'Epson offline-queue test heeft een fout geretourneerd.' }
+          $names = @('BIC EPSON PILOT - Blanco Kleur', 'BIC EPSON PILOT - Blanco Zwart Wit', 'BIC EPSON PILOT - CMR')
+          foreach ($name in $names) {
+            $printer = Get-Printer -Name $name -ErrorAction Stop
+            if ($printer.DriverName -ne 'EPSON Universal Print Driver') { throw "Verkeerde driver: $name" }
+            $port = Get-PrinterPort -Name $printer.PortName -ErrorAction Stop
+            if ([string]$port.PrinterHostAddress -ne '192.0.2.50') { throw "Verkeerd poortadres: $name" }
+            Write-Host ('EPSON_QUEUE_CI_OK=' + $name + ';Driver=' + $printer.DriverName + ';Port=' + $port.Name)
+          }
+          Write-Host 'EPSON_ALL_THREE_QUEUES_VERIFIED'
