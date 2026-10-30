@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "note": "FAIL-CLOSED. No driver has been approved yet. Fill real HTTPS ZIP URL, SHA256, INF/CAT paths and Windows driver name after reviewing redistribution terms and doing Windows pilot.",
+  "drivers": {
+    "HP": {
+      "status": "pending",
+      "description": "HP Universal Print Driver, PCL6, Windows x64",
+      "sourcePage": "https://support.hp.com/nl-nl/drivers/hp-universal-print-driver-series-for-windows/model/3271558",
+      "driverName": "",
+      "downloadUrl": "",
+      "sha256": "",
+      "infRelativePath": "",
+      "catRelativePath": "",
+      "remark": "Controleer modelondersteuning en PCL6/PS-taal.",
+      "signerSubjectContains": ""
+    },
+    "Epson": {
+      "status": "pending",
+      "description": "EPSON Universal Print Driver x64 (WF-C20600 voorbeeld, v2.122.00 op supportpagina)",
+      "sourcePage": "https://epson.com/Support/Printers/All-In-Ones/WorkForce-Series/Epson-WorkForce-Enterprise-WF-C20600/s/SPT_C11CH86201?review-filter=Windows+11",
+      "driverName": "",
+      "downloadUrl": "",
+      "sha256": "",
+      "infRelativePath": "",
+      "catRelativePath": "",
+      "remark": "Controleer exact Windows driver-model en Cassette 1/2 offline; vendor EXE eerst gecontroleerd uitpakken en verpakken als ZIP.",
+      "signerSubjectContains": ""
+    },
+    "Canon": {
+      "status": "pending",
+      "description": "Canon Generic Plus PCL6 x64",
+      "sourcePage": "https://www.canon.com.au/support/sims-content?cid=2F21BAD542114D41954F5883409A1ABF&ctype=dr&pid=e1e381983ffb4764a9004bf5f9d05ea1",
+      "driverName": "",
+      "downloadUrl": "",
+      "sha256": "",
+      "infRelativePath": "",
+      "catRelativePath": "",
+      "remark": "Verifieer ondersteunde modellen en recente advisories.",
+      "signerSubjectContains": ""
+    },
+    "Kyocera": {
+      "status": "pending",
+      "description": "Kyocera KX Universal Printer Driver x64",
+      "sourcePage": "https://www.kyoceradocumentsolutions.eu/en/support/downloads.name-L2V1L2VuL21mcC9FQ09TWVNNMzY1NUlETg%3D%3D.html",
+      "driverName": "",
+      "downloadUrl": "",
+      "sha256": "",
+      "infRelativePath": "",
+      "catRelativePath": "",
+      "remark": "Download is groot (circa 239MB); gebruik een geschikte geauthenticeerde bron of toegestane GitHub Release Asset, niet GitHub Contents API.",
+      "signerSubjectContains": ""
+    },
+    "Ricoh": {
+      "status": "pending",
+      "description": "Ricoh PCL6 Driver for Universal Print x64",
+      "sourcePage": "https://support.ricoh.com/bb/html/dr_ut_e/re2/model/p410a/p410aen.htm",
+      "driverName": "",
+      "downloadUrl": "",
+      "sha256": "",
+      "infRelativePath": "",
+      "catRelativePath": "",
+      "remark": "Exacte INF drivernaam controleren.",
+      "signerSubjectContains": ""
+    },
+    "Brother": {
+      "status": "pending",
+      "description": "Brother Universal Printer Driver PCL (zwart-wit profiel)",
+      "sourcePage": "https://help.brother-usa.com/app/answers/detail/a_id/67184/p/7265",
+      "driverName": "",
+      "downloadUrl": "",
+      "sha256": "",
+      "infRelativePath": "",
+      "catRelativePath": "",
+      "remark": "Brother vermeldt dat de Universal PCL-driver alleen zwart-wit ondersteunt. Kleurprinters vereisen modelcompatibel alternatief.",
+      "signerSubjectContains": ""
+    }
+  }
+}

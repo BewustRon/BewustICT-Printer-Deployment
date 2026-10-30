@@ -1,0 +1,10 @@
+*.exe
+*.msi
+*.zip
+*.cab
+*.cat
+*.sys
+*.dll
+*.log
+*.bak
+.DS_Store
