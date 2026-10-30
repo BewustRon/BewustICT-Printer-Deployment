@@ -89,6 +89,7 @@ namespace BewustICT {
         private const int DM_IN_BUFFER = 0x00000008;
         private const int DM_OUT_BUFFER = 0x00000002;
         private const uint PRINTER_ACCESS_ADMINISTER = 0x00000004;
+        private const uint PRINTER_ACCESS_USE = 0x00000008;
 
         private static void AssertDevMode(IntPtr ptr) {
             if (ptr == IntPtr.Zero) throw new InvalidOperationException("Null global DEVMODE.");
@@ -105,7 +106,7 @@ namespace BewustICT {
             infoBuffer = Marshal.AllocHGlobal((int)required);
             try {
                 if (!GetPrinter(handle,8,infoBuffer,required,out required))
-                    throw new Win32Exception(Marshal.GetLastWin32Error(),"GetPrinter Level 8 failed");
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),"GetPrinter Level 8 failed (reading global DEVMODE; requested USE+ADMIN for writes)");
                 IntPtr mode = Marshal.ReadIntPtr(infoBuffer);
                 AssertDevMode(mode);
                 return mode;
@@ -118,7 +119,7 @@ namespace BewustICT {
 
         private static IntPtr Open(string name, bool administer) {
             PRINTER_DEFAULTS defaults = new PRINTER_DEFAULTS();
-            defaults.DesiredAccess = administer ? PRINTER_ACCESS_ADMINISTER : 0x00000008;
+            defaults.DesiredAccess = administer ? (PRINTER_ACCESS_ADMINISTER | PRINTER_ACCESS_USE) : PRINTER_ACCESS_USE;
             IntPtr handle;
             if (!OpenPrinter(name,out handle,ref defaults) || handle == IntPtr.Zero)
                 throw new Win32Exception(Marshal.GetLastWin32Error(),"OpenPrinter failed");
