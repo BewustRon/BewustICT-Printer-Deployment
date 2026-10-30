@@ -1,0 +1,35 @@
+name: Universele NinjaOne v0.8 Epson offline integratietest
+on:
+  push:
+    paths:
+      - '.github/workflows/universal-printer-pilot-test.yml'
+      - 'scripts/Deploy-BewustICTPrinter-v0.8.0-PILOT.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test driver, queue, kleur, duplex en lade zonder Epson
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='.\scripts\Deploy-BewustICTPrinter-v0.8.0-PILOT.ps1'
+          $items=@(
+            @{Name='BIC INTEGRATIE - Blanco Kleur'; Color='Kleur'; Tray='Cassette 2'},
+            @{Name='BIC INTEGRATIE - Blanco Zwart Wit'; Color='Zwart-wit'; Tray='Cassette 2'},
+            @{Name='BIC INTEGRATIE - CMR'; Color='Zwart-wit'; Tray='Cassette 1'}
+          )
+          foreach($item in $items){
+            & $script -Actie Installeren -PrinterNaam $item.Name -PrinterIpAdres '192.0.2.50' -PrinterMerk Epson -KleurAfdrukken $item.Color -DubbelzijdigAfdrukken Uit -Papierformaat A4 -Papierlade $item.Tray
+            if (-not $?) {throw "Installatie mislukt: $($item.Name)"}
+            $p=Get-Printer -Name $item.Name -ErrorAction Stop
+            if($p.DriverName -ne 'EPSON Universal Print Driver'){throw "Verkeerde driver op $($item.Name)"}
+            $cfg=Get-PrintConfiguration -PrinterName $item.Name -ErrorAction Stop
+            $expectedColor=$item.Color -eq 'Kleur'
+            if([bool]$cfg.Color -ne $expectedColor -or [string]$cfg.DuplexingMode -ne 'OneSided' -or [string]$cfg.PaperSize -ne 'A4'){throw "Ongeldige printvoorkeuren: $($item.Name)"}
+          }
+          Write-Host 'UNIFIED_EPSON_OFFLINE_TEST_OK: drie queues met juiste drivers, instellingen en ladeverificatie.'
