@@ -1,0 +1,71 @@
+name: Epson UPD x64 - inspecteer officiele installer (geen installatie)
+
+on:
+  push:
+    paths:
+      - '.github/workflows/epson-package-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - name: Ophalen, hash/signatuur controleren en inhoud inventariseren
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://ftp.epson.com/drivers/EUPD_x64_212200.exe'
+          $filename = 'EUPD_x64_212200.exe'
+          $output = Join-Path $env:RUNNER_TEMP $filename
+          Write-Host ('Official Epson candidate URL: ' + $url)
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $output -TimeoutSec 240 -ErrorAction Stop
+          } catch {
+            throw ('OFFICIAL_DOWNLOAD_FAILED: ' + $_.Exception.Message)
+          }
+          $file = Get-Item -LiteralPath $output
+          Write-Host ("ACTUAL_SIZE_BYTES={0}" -f $file.Length)
+          if ($file.Length -lt 50000000 -or $file.Length -gt 150000000) {
+            throw 'Onverwachte bestandsgrootte (verwacht Epson 87.7 MB).'
+          }
+          Write-Host ('SOURCE_SHA256=' + (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash)
+          $signature = Get-AuthenticodeSignature -FilePath $output
+          Write-Host ('SOURCE_SIGNATURE_STATUS=' + $signature.Status)
+          if ($signature.SignerCertificate) {
+            Write-Host ('SOURCE_SIGNER=' + $signature.SignerCertificate.Subject)
+          }
+          if ($signature.Status -ne 'Valid') { throw 'Installer is niet geldig ondertekend.' }
+          $zip7 = 'C:\Program Files\7-Zip\7z.exe'
+          if (-not (Test-Path -LiteralPath $zip7)) {
+            Write-Warning '7-Zip niet aanwezig op de Windows runner; INF inventarisatie overgeslagen.'
+            exit 0
+          }
+          $listing = & $zip7 l $output 2>&1
+          Write-Host ('7ZIP_LIST_EXITCODE=' + $LASTEXITCODE)
+          $listing | Select-String -Pattern '\.(inf|cat|zip|cab|msi|txt|xml)(\s|$)' | Select-Object -First 70 | ForEach-Object { Write-Host $_.Line }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Epson wrapper is niet rechtstreeks als archief te openen; niets uitgevoerd.'
+            exit 0
+          }
+          $dest = Join-Path $env:RUNNER_TEMP 'epson-extract'
+          New-Item -Path $dest -ItemType Directory -Force | Out-Null
+          & $zip7 x $output ("-o$dest") '-y' | Out-Null
+          if ($LASTEXITCODE -ne 0) { Write-Warning 'Uitpakken mislukte; installer wordt NIET gestart.'; exit 0 }
+          $inf = @(Get-ChildItem -LiteralPath $dest -Filter '*.inf' -File -Recurse -ErrorAction SilentlyContinue)
+          $cat = @(Get-ChildItem -LiteralPath $dest -Filter '*.cat' -File -Recurse -ErrorAction SilentlyContinue)
+          Write-Host ('INF_COUNT=' + $inf.Count)
+          Write-Host ('CAT_COUNT=' + $cat.Count)
+          foreach ($i in ($inf | Select-Object -First 30)) {
+            Write-Host ('INF_PATH=' + $i.FullName.Substring($dest.Length + 1))
+            Get-Content -LiteralPath $i.FullName | Select-String -Pattern '^\s*(CatalogFile|Class|Provider)\s*=|^\s*Epson\s*=' | Select-Object -First 15 | ForEach-Object { Write-Host ('INF_HEADER=' + $_.Line) }
+          }
+          foreach ($i in ($cat | Select-Object -First 30)) {
+            $sig = Get-AuthenticodeSignature -FilePath $i.FullName
+            Write-Host ('CAT=' + $i.FullName.Substring($dest.Length + 1) + ';STATUS=' + $sig.Status)
+          }
+          Write-Host 'INSPECTION_DONE: geen fabrikantsoftware uitgevoerd of gepubliceerd.'
