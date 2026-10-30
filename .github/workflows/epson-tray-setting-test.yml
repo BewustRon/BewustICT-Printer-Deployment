@@ -1,0 +1,38 @@
+name: Epson UPD - Cassette 1 en 2 offline instellen
+on:
+  push:
+    paths:
+      - '.github/workflows/epson-tray-setting-test.yml'
+      - 'scripts/Set-BewustICTPrinterTray.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installeer Epson-driver en drie offline printers
+        shell: powershell
+        run: |
+          & .\scripts\Test-EpsonUPD-Offline.ps1 -Actie Installeren -PrinterIpAdres '192.0.2.50'
+          if (-not $?) { throw 'Offline Epson queue-installatie mislukt.' }
+      - name: Stel cassette per printer in en verifieer driverinstellingen
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $items = @(
+            @{ Name='BIC EPSON PILOT - Blanco Kleur'; Tray='Cassette 2' },
+            @{ Name='BIC EPSON PILOT - Blanco Zwart Wit'; Tray='Cassette 2' },
+            @{ Name='BIC EPSON PILOT - CMR'; Tray='Cassette 1' }
+          )
+          foreach ($i in $items) {
+            & .\scripts\Set-BewustICTPrinterTray.ps1 -PrinterNaam $i.Name -Papierlade $i.Tray -Actie Instellen
+            if (-not $?) { throw "Ladeconfiguratie mislukt: $($i.Name)" }
+          }
+          foreach ($i in $items) {
+            & .\scripts\Set-BewustICTPrinterTray.ps1 -PrinterNaam $i.Name -Papierlade $i.Tray -Actie Controleren
+            if (-not $?) { throw "Verificatie mislukt: $($i.Name)" }
+          }
+          Write-Host 'EPSON_TRAY_TEST_FINISHED'
