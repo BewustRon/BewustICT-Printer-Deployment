@@ -5,19 +5,23 @@
 .DESCRIPTION
   Maakt een Windows-printerqueue aan met een Standard TCP/IP-poort, ook als de
   printer nog niet bereikbaar is. Gebruikt een exact vooraf geinstalleerde
-  driver of een goedgekeurd INF-driverpakket uit een HTTPS-drivercatalogus.
+  driver, een goedgekeurd INF-driverpakket uit een HTTPS-drivercatalogus of
+  voor de Epson-pilot de officiele SHA256-gepinde Epson Universal Print Driver
+  v2.122.00 rechtstreeks vanaf de fabrikantsite.
 
   OFFLINE TEST: Actie='Offline testen' maakt drie veilige BIC TEST-queues aan
   op het gereserveerde IP 192.0.2.50 met een Windows-testdriver.
   Actie='Test opruimen' verwijdert alleen die gemarkeerde testqueues.
 
-  PILOT: niet gevalideerd op Windows/NinjaOne; geen productie-uitrol voordat
-  drivernaam, fysieke lades en afdrukken per model zijn getest.
+  PILOT: Windows GitHub Actions test op Epson UPD, queueconfiguratie en ladekeuze
+  is geslaagd. NinjaOne uitrol en fysieke afdrukken zijn nog niet bewezen.
+  Niet breed inzetten voordat modelcompatibiliteit en printtest zijn gedaan.
 
   Veiligheidsgrenzen:
   - Geen IPP-discovery, geen ping vereist voor installatie.
   - Download alleen HTTPS + een vooraf vastgelegde SHA256 + geldige CAT-signatuur.
-  - Geen EXE installers; alleen ZIP met INF/CAT driver files.
+  - Epson SFX EXE wordt alleen als ZIP/archief uitgepakt, nooit uitgevoerd.
+  - Overige merken: alleen vooraf goedgekeurde ZIP met INF/CAT.
   - Verwijderen en wijzigen alleen voor door dit script gemarkeerde queues.
   - Een afwijkende papierlade wordt nooit aangenomen zonder bevestiging.
   - Deze versie gebruikt RAW TCP/9100; check dat de printer dit ondersteunt.
@@ -37,7 +41,7 @@ param(
     [string]$InstellenAlsStandaardprinter = 'false'
 )
 $ErrorActionPreference = 'Stop'
-$Version = '0.6.0-PILOT'
+$Version = '0.8.0-PILOT'
 $Root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment'
 $LogDir = Join-Path $Root 'Logs'
 $PkgDir = Join-Path $Root 'DriverPackages'
@@ -232,6 +236,73 @@ function Get-SafeChildPath {
     }
     return $FullPath
 }
+
+# Epson v2.122.00: fabrikant direct, zonder herpublicatie en zonder fysieke printer.
+# Pilot: compatibiliteit met concreet Epson-model moet voor productie worden getoetst.
+function Install-EpsonVendorUPD {
+    $Name = 'EPSON Universal Print Driver'
+    $Existing = Get-PrinterDriver -Name $Name -ErrorAction SilentlyContinue
+    if ($Existing) {
+        Write-Log "Epson UPD is al in Windows aanwezig: '$Name'. Bestaande driverversie wordt niet vervangen in pilot."
+        return $Name
+    }
+    $Url = 'https://ftp.epson.com/drivers/EUPD_x64_212200.exe'
+    $Hash = '3CC1C313ADFAB74F957E2AF63FF2FA87279169E3A043365EB0AF6024D420663B'
+    $InfHash = 'C4AE14C42E42147288B143F36E1EE10DF003656C6363AB9A17C0D6F6A0592F2D'
+    $PackageDirectory = Join-Path $PkgDir 'Epson-UPD-2.122.00'
+    $Exe = Join-Path $PackageDirectory 'EUPD_x64_212200.exe'
+    $Extract = Join-Path $PackageDirectory 'Extracted'
+    New-Item -Path $PackageDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
+        [void](Test-Https -Url $Url)
+        Write-Log 'Download Epson Universal Print Driver 2.122.00 vanaf officiële Epson-server.'
+        Invoke-WebRequest -Uri $Url -OutFile $Exe -UseBasicParsing -TimeoutSec 300 -ErrorAction Stop
+    }
+    $ActualHash = (Get-FileHash -LiteralPath $Exe -Algorithm SHA256 -ErrorAction Stop).Hash
+    if ($ActualHash -ne $Hash) { throw "Epson UPD SHA256 mismatch: ontvangen $ActualHash." }
+    $Signature = Get-AuthenticodeSignature -LiteralPath $Exe -ErrorAction Stop
+    if ($Signature.Status -ne 'Valid' -or [string]$Signature.SignerCertificate.Subject -notmatch 'SEIKO EPSON CORPORATION') {
+        throw 'Epson UPD heeft geen geldige originele Authenticode-handtekening.'
+    }
+    Write-Log 'Epson UPD: SHA256 en fabrikant-signatuur gevalideerd; archief wordt uitgepakt.'
+    Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    $Archive = [IO.Compression.ZipFile]::OpenRead($Exe)
+    try {
+        [long]$Bytes = 0
+        foreach ($Entry in $Archive.Entries) {
+            if ($Entry.FullName) {
+                [void](Get-SafeChildPath -Base $Extract -Relative $Entry.FullName)
+            }
+            $Bytes += [long]$Entry.Length
+            if ($Bytes -gt 1073741824) { throw 'Epson SFX bevat te veel uitgepakte data (>1 GiB).' }
+        }
+    } finally { $Archive.Dispose() }
+    if (Test-Path -LiteralPath $Extract) {
+        Remove-Item -LiteralPath $Extract -Recurse -Force -ErrorAction Stop
+    }
+    [IO.Compression.ZipFile]::ExtractToDirectory($Exe,$Extract)
+    $InfPath = Join-Path $Extract 'Universal_Print_Driver_x64_212200\E_JFB0DE.INF'
+    $CatPath = Join-Path $Extract 'Universal_Print_Driver_x64_212200\e_jfb0de.cat'
+    if (-not (Test-Path -LiteralPath $InfPath -PathType Leaf) -or -not (Test-Path -LiteralPath $CatPath -PathType Leaf)) {
+        throw 'Epson driver INF/CAT ontbreken in het gevalideerde pakket.'
+    }
+    $InfHashActual = (Get-FileHash -LiteralPath $InfPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if ($InfHashActual -ne $InfHash) { throw "Epson INF hash mismatch: ontvangen $InfHashActual." }
+    $CatSignature = Get-AuthenticodeSignature -LiteralPath $CatPath -ErrorAction Stop
+    if ($CatSignature.Status -ne 'Valid' -or [string]$CatSignature.SignerCertificate.Subject -notmatch 'Microsoft Windows Hardware Compatibility Publisher') {
+        throw 'Epson CAT heeft geen geldige Windows WHCP-handtekening.'
+    }
+    $PnpUtil = Join-Path $env:WINDIR 'System32\pnputil.exe'
+    $PnpResult = & $PnpUtil '/add-driver' $InfPath 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "PnPUtil /add-driver mislukt: $($PnpResult -join ' ')" }
+    Add-PrinterDriver -Name $Name -ErrorAction Stop
+    $Installed = Get-PrinterDriver -Name $Name -ErrorAction Stop
+    if (-not $Installed -or $Installed.Name -ne $Name) { throw 'Epson UPD niet in Windows geregistreerd.' }
+    Write-Log "EPSON_UPD_DRIVER_OK: '$Name' geregistreerd, zonder printerdetectie."
+    return $Name
+}
+
 function Install-ApprovedDriver {
     param([string]$Brand,[string]$CatalogUrl)
     if ([string]::IsNullOrWhiteSpace($CatalogUrl)) {
@@ -314,92 +385,32 @@ function Install-ApprovedDriver {
     Write-Log "Goedgekeurde driver '$Name' toegevoegd aan Windows."
     return $Name
 }
-function Get-CassetteMatches {
-    param([string]$Name,[int]$Number)
-    try { Add-Type -AssemblyName ReachFramework -ErrorAction Stop }
-    catch { Add-Type -AssemblyName System.Printing -ErrorAction Stop }
-    $Server = New-Object System.Printing.LocalPrintServer
-    $Queue = $null
-    $Stream = $null
-    try {
-        $Queue = $Server.GetPrintQueue($Name)
-        $Stream = $Queue.GetPrintCapabilitiesAsXml()
-        if (-not $Stream) { throw "Geen PrintCapabilities voor '$Name'." }
-        [xml]$Xml = [Text.Encoding]::UTF8.GetString($Stream.ToArray())
-        $SafeName = $Name -replace '[^a-zA-Z0-9_.-]','_'
-        $Diag = Join-Path $DiagnosticsDir ("$SafeName-PrintCapabilities.xml")
-        [IO.File]::WriteAllText($Diag,$Xml.OuterXml,[Text.Encoding]::UTF8)
-        $Matches = @()
-        $Rx = '(?i)(?:^|[^a-z0-9])cassette[ _-]*' + $Number + '(?:$|[^0-9])'
-        foreach ($Feature in @($Xml.SelectNodes("//*[local-name()='Feature']"))) {
-            if ([string]$Feature.GetAttribute('name') -notmatch 'InputBin$') { continue }
-            foreach ($Option in @($Feature.SelectNodes("./*[local-name()='Option']"))) {
-                $Names = @([string]$Option.GetAttribute('name'))
-                foreach ($Prop in @($Option.SelectNodes("./*[local-name()='Property']"))) {
-                    if ([string]$Prop.GetAttribute('name') -notmatch 'DisplayName$') { continue }
-                    $Names += @($Prop.SelectNodes(".//*[local-name()='Value']") | ForEach-Object { $_.InnerText })
-                }
-                if (($Names -join ' ') -match $Rx) {
-                    $Matches += [pscustomobject]@{ FeatureName=$Feature.GetAttribute('name'); OptionName=$Option.GetAttribute('name'); Xml=$Xml }
-                }
-            }
-        }
-        return $Matches
-    }
-    finally {
-        if ($Stream) { $Stream.Dispose() }
-        if ($Queue) { $Queue.Dispose() }
-        if ($Server) { $Server.Dispose() }
-    }
-}
+# Ladekeuze via een generieke, op de Windows-spooler gevalideerde DEVMODE helper.
+# GitHub helper is vastgepind op de commit die in CI succesvol Cassette 1/2 schreef.
 function Set-CassetteStrict {
     param([string]$Name,[int]$Number)
-    $Matches = @(Get-CassetteMatches -Name $Name -Number $Number)
-    if ($Matches.Count -ne 1) {
-        throw "Cassette $Number kan niet veilig gekozen worden (matches=$($Matches.Count)). De queue bestaat al; ladeconfiguratie vereist driver-specifieke validatie."
+    if ($Number -lt 1 -or $Number -gt 4) { throw "Ongeldig cassettenummer '$Number'." }
+    $TrayName = 'Cassette {0}' -f $Number
+    $Pin = '787eb04801725623691d65d9963b5bb80bf2f55b'
+    $Url = 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/{0}/scripts/Set-BewustICTPrinterTray.ps1' -f $Pin
+    [void](Test-Https -Url $Url)
+    $Tools = Join-Path $Root 'Tools'
+    New-Item -Path $Tools -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    $ToolFile = Join-Path $Tools ('Set-BewustICTPrinterTray-{0}.ps1' -f $Pin.Substring(0,12))
+    if (-not (Test-Path -LiteralPath $ToolFile -PathType Leaf)) {
+        Write-Log "Ophalen van op commit $Pin vastgepinde generieke papierlade-helper."
+        Invoke-WebRequest -Uri $Url -UseBasicParsing -OutFile $ToolFile -TimeoutSec 90 -ErrorAction Stop
     }
-    $Selected = $Matches[0]
-    $Current = Get-ConfigRetry -Name $Name
-    if ([string]::IsNullOrWhiteSpace([string]$Current.PrintTicketXml)) {
-        throw 'Geen PrintTicket XML beschikbaar voor ladeconfiguratie.'
-    }
-    [xml]$Ticket = [string]$Current.PrintTicketXml
-    $RootNode = $Ticket.DocumentElement
-    if (-not $RootNode -or $RootNode.LocalName -ne 'PrintTicket') { throw 'Onverwacht PrintTicket-formaat.' }
-    $XmlNs = 'http://www.w3.org/2000/xmlns/'
-    foreach ($Attr in @($Selected.Xml.DocumentElement.Attributes)) {
-        if ($Attr.NamespaceURI -ne $XmlNs -or $Attr.Prefix -ne 'xmlns') { continue }
-        $Prefix = $Attr.LocalName
-        $Existing = $RootNode.GetNamespaceOfPrefix($Prefix)
-        if ($Existing -and $Existing -ne $Attr.Value) { throw "PrintTicket-namespaceconflict '$Prefix'." }
-        if (-not $Existing) { $RootNode.SetAttribute(('xmlns:'+$Prefix),$XmlNs,$Attr.Value) }
-    }
-    $Ns = $RootNode.NamespaceURI
-    $Prefix = $RootNode.Prefix
-    if (-not $Prefix) {
-        $Prefix = 'psf'
-        $RootNode.SetAttribute('xmlns:psf',$XmlNs,$Ns)
-    }
-    foreach ($Feature in @($RootNode.SelectNodes("./*[local-name()='Feature']"))) {
-        if ($Feature.GetAttribute('name') -match 'InputBin$') { $RootNode.RemoveChild($Feature) | Out-Null }
-    }
-    $NewFeature = $Ticket.CreateElement($Prefix,'Feature',$Ns)
-    $NewFeature.SetAttribute('name',$Selected.FeatureName)
-    $NewOption = $Ticket.CreateElement($Prefix,'Option',$Ns)
-    $NewOption.SetAttribute('name',$Selected.OptionName)
-    $NewFeature.AppendChild($NewOption) | Out-Null
-    $RootNode.AppendChild($NewFeature) | Out-Null
-    Set-PrintConfiguration -PrinterName $Name -PrintTicketXml $Ticket.OuterXml -ErrorAction Stop
-    [xml]$Verified = [string](Get-ConfigRetry -Name $Name).PrintTicketXml
-    $IsSet = $false
-    foreach ($Feature in @($Verified.SelectNodes("//*[local-name()='Feature']"))) {
-        if ($Feature.GetAttribute('name') -ne $Selected.FeatureName) { continue }
-        foreach ($Option in @($Feature.SelectNodes("./*[local-name()='Option']"))) {
-            if ($Option.GetAttribute('name') -eq $Selected.OptionName) { $IsSet = $true }
+    $PowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    foreach ($Action in @('Instellen','Controleren')) {
+        $Output = & $PowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $ToolFile -PrinterNaam $Name -Papierlade $TrayName -Actie $Action 2>&1
+        $Code = $LASTEXITCODE
+        foreach ($Line in @($Output)) {
+            Write-Log ("TRAY/{0}: {1}" -f $Action,([string]$Line))
         }
+        if ($Code -ne 0) { throw "Papierlade $TrayName kon niet door de spooler worden $Action voor '$Name' (exit $Code)." }
     }
-    if (-not $IsSet) { throw "Windows heeft de gewenste Cassette $Number niet behouden." }
-    Write-Log "Cassette $Number is door PrintTicket bevestigd; fysieke proefafdruk blijft noodzakelijk."
+    Write-Log "CASSETTE_CONFIRMED: '$Name' = '$TrayName' als globale Windows-printerstandaard; fysiek afdrukken blijft te testen."
 }
 
 # Per-user standaardprinter: beheerde taak, geen HKCU-aanpassing vanuit SYSTEM.
@@ -553,6 +564,8 @@ try {
             throw "Opgegeven driver '$ResolvedDriverName' is niet aanwezig. Voor automatische download: keur de merkdriver goed in de centrale catalogus en laat driverNaam leeg."
         }
         Write-Log "Gebruik reeds geinstalleerde driver '$ResolvedDriverName'."
+    } elseif ($PrinterMerk -eq 'Epson') {
+        $ResolvedDriverName = Install-EpsonVendorUPD
     } else {
         $ResolvedDriverName = Install-ApprovedDriver -Brand $PrinterMerk -CatalogUrl $DriverCatalogusUrl
     }
