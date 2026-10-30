@@ -27,3 +27,11 @@ Voor andere merken is toestemming nog niet bevestigd. Ook daar geen binair pakke
 
 ## Epson WF-C20600 pilot
 De Epson UPD x64 v2.122.00 is de eerste kandidaat. Download en installeer deze op één testwerkplek volgens de voorwaarden van Epson. Lees de exacte drivernaam uit met Get-PrinterDriver. Gebruik de bestaande centrale NinjaOne-automation met optioneel driverNaam als de driver al lokaal geinstalleerd is. De fysieke Cassette 1 en 2 moeten apart worden gecontroleerd. De voorbereiding van de TCP/IP-queue is offline mogelijk, maar een printopdracht werkt pas als de printer en de gekozen protocol/poort bereikbaar zijn.
+
+## Gecontroleerde Epson binary (Windows GitHub Actions 30-10-2026)
+
+Bron `https://ftp.epson.com/drivers/EUPD_x64_212200.exe`; bestandsgrootte **91.939.144 bytes**; SHA256 `3CC1C313ADFAB74F957E2AF63FF2FA87279169E3A043365EB0AF6024D420663B`.
+
+De Authenticode-handtekening van de EXE en de CAT is **Valid**, uitgever `SEIKO EPSON CORPORATION`. De EXE is als archief uitleesbaar met 7-Zip. Daarin zijn gevonden: `Universal_Print_Driver_x64_212200/E_JFB0DE.INF` en `Universal_Print_Driver_x64_212200/e_jfb0de.cat` (1 INF, 1 CAT). Ook `WINX64/E_WLB0EE.CAB` en `WINX64/E_WLC0EE.CAB` zijn aanwezig.
+
+Bewijs: https://github.com/BewustRon/BewustICT-Printer-Deployment/actions/runs/41041487722 . Geen driver is hierbij geinstalleerd of publiek gepubliceerd. Drivernaam, offline `pnputil` en `Add-PrinterDriver` moeten nog worden geverifieerd voordat de catalogus op `approved` kan.
