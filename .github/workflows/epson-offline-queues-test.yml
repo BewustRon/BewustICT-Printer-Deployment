@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - '.github/workflows/epson-offline-queues-test.yml'
+      - 'scripts/Inspect-BewustICTPrinter.ps1'
   workflow_dispatch:
 permissions:
   contents: read
