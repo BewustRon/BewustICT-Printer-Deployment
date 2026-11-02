@@ -59,25 +59,54 @@ try {
 
     Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    # Brother SFX: ZipFile.ExtractToDirectory kan een afwijkende EOCD/telling
+    # afwijzen. Lees de reeds geverifieerde SFX slechts eenmaal en extraheer
+    # daarna de zichtbare entries individueel, met pad- en volumelimieten.
     $zip=[IO.Compression.ZipFile]::OpenRead($Exe)
     try {
         [long]$unzipped=0
+        $entries=@($zip.Entries)
+        Write-Host ("BROTHER_ZIP_ENTRIES={0}" -f $entries.Count)
+        if ($entries.Count -lt 1 -or $entries.Count -gt 10000) {throw 'UNEXPECTED_ZIP_ENTRY_COUNT'}
         $base=[IO.Path]::GetFullPath($Extract).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-        foreach ($entry in $zip.Entries) {
+        foreach ($entry in $entries) {
             if (-not $entry.FullName) {continue}
-            $dest=[IO.Path]::GetFullPath((Join-Path $Extract $entry.FullName))
+            $relative=$entry.FullName.Replace('/','\')
+            $dest=[IO.Path]::GetFullPath((Join-Path $Extract $relative))
             if (-not $dest.StartsWith($base,[StringComparison]::OrdinalIgnoreCase)) {
                 throw "ZIP_SLIP_PROTECTION_TRIGGERED $($entry.FullName)"
             }
             $unzipped += [long]$entry.Length
             if ($unzipped -gt 512MB) {throw "UNCOMPRESSED_SIZE_TOO_LARGE $unzipped"}
         }
+        if (Test-Path -LiteralPath $Extract) {
+            Remove-Item -LiteralPath $Extract -Recurse -Force -ErrorAction Stop
+        }
+        [void][IO.Directory]::CreateDirectory($Extract)
+        $filesWritten=0
+        foreach ($entry in $entries) {
+            $relative=$entry.FullName.Replace('/','\')
+            $dest=[IO.Path]::GetFullPath((Join-Path $Extract $relative))
+            if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
+                [void][IO.Directory]::CreateDirectory($dest)
+                continue
+            }
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dest))
+            $inputStream=$null
+            $outputStream=$null
+            try {
+                $inputStream=$entry.Open()
+                $outputStream=[IO.File]::Open($dest,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
+                $inputStream.CopyTo($outputStream)
+            } finally {
+                if ($null -ne $outputStream) {$outputStream.Dispose()}
+                if ($null -ne $inputStream) {$inputStream.Dispose()}
+            }
+            $filesWritten++
+            if ($filesWritten -le 4) {Write-Host ("EXTRACTED_ENTRY="+$relative)}
+        }
+        Write-Host ("BROTHER_MANAGED_EXTRACTION_COMPLETE files={0}" -f $filesWritten)
     } finally {$zip.Dispose()}
-    if (Test-Path -LiteralPath $Extract) {
-        Remove-Item -LiteralPath $Extract -Recurse -Force -ErrorAction Stop
-    }
-    [IO.Compression.ZipFile]::ExtractToDirectory($Exe,$Extract)
-    Write-Host "EXTRACTED_WITH_DOTNET"
 
     $Inf=Join-Path $Extract $InfRelative
     $Cat=Join-Path $Extract $CatRelative
