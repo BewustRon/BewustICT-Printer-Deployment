@@ -1,0 +1,26 @@
+name: Brother PCL - signed driver registration and offline queue
+on:
+  push:
+    paths:
+      - '.github/workflows/brother-offline-driver-test.yml'
+      - 'scripts/Test-BrotherUPD-Offline.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  install:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install signed Brother UPD and offline TCP printer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\scripts\Test-BrotherUPD-Offline.ps1 -Actie Installeren -PrinterNaam 'BIC BROTHER CI - L5500DN' -PrinterIpAdres '192.0.2.50'
+          if (-not $?) { throw 'Brother installation or queue creation returned failure' }
+          $p=Get-Printer -Name 'BIC BROTHER CI - L5500DN' -ErrorAction Stop
+          if ($p.DriverName -ne 'Brother Mono Universal Printer (PCL)') { throw ('Unexpected driver '+$p.DriverName) }
+          $port=Get-PrinterPort -Name $p.PortName -ErrorAction Stop
+          if ([string]$port.PrinterHostAddress -ne '192.0.2.50') { throw 'Unexpected port IP' }
+          Write-Host 'BROTHER_CI_OFFLINE_INSTALL_CONFIRMED'
