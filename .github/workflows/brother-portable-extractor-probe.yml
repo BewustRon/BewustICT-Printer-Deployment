@@ -15,7 +15,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $zipUrl='https://www.7-zip.org/a/7z2605-extra.7z'
+          $zipUrl='https://github.com/ip7z/7zip/releases/download/26.05/7z2605-extra.7z'
           $zipHash='F27A8F103C84785026EDCBA1F67FAF1357225DF9D19DDB0B7760D55947141BC7'
           $brotherUrl='https://download.brother.com/welcome/dlf107285/UNIV-PCL-01101.EXE'
           $brotherHash='BA40F5EFE1D1D3896139BC31BC28B4A3F2E75C76684987239019DB6A68D6977D'
