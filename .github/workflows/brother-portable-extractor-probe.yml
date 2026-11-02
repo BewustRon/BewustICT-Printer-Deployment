@@ -1,0 +1,62 @@
+name: Brother UPD - portable extractor feasibility probe
+on:
+  push:
+    paths:
+      - '.github/workflows/brother-portable-extractor-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate and extract official 7-Zip Extra, inspect Brother SFX
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $zipUrl='https://www.7-zip.org/a/7z2605-extra.7z'
+          $zipHash='F27A8F103C84785026EDCBA1F67FAF1357225DF9D19DDB0B7760D55947141BC7'
+          $brotherUrl='https://download.brother.com/welcome/dlf107285/UNIV-PCL-01101.EXE'
+          $brotherHash='BA40F5EFE1D1D3896139BC31BC28B4A3F2E75C76684987239019DB6A68D6977D'
+          $extra=Join-Path $env:RUNNER_TEMP '7z2605-extra.7z'
+          $brother=Join-Path $env:RUNNER_TEMP 'UNIV-PCL-01101.EXE'
+          Invoke-WebRequest -Uri $zipUrl -OutFile $extra -UseBasicParsing -TimeoutSec 120
+          Invoke-WebRequest -Uri $brotherUrl -OutFile $brother -UseBasicParsing -TimeoutSec 180
+          if ((Get-FileHash $extra -Algorithm SHA256).Hash -ne $zipHash){throw 'PINNED_7Z_SHA256_FAILED'}
+          if ((Get-FileHash $brother -Algorithm SHA256).Hash -ne $brotherHash){throw 'PINNED_BROTHER_SHA256_FAILED'}
+          Write-Host 'VENDOR_BINARY_SHA256S_VERIFIED'
+          $dest=Join-Path $env:RUNNER_TEMP 'Portable7Zip'
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          $tar=Join-Path $env:WINDIR 'System32\tar.exe'
+          Write-Host ('TAR_PATH='+$tar)
+          $listing=& $tar '-tf' $extra 2>&1
+          $tarListCode=$LASTEXITCODE
+          Write-Host ('TAR_LIST_CODE='+$tarListCode)
+          $listing | Select-Object -First 25 | ForEach-Object { Write-Host ('TAR_ENTRY='+[string]$_) }
+          if($tarListCode -ne 0){throw 'BUILTIN_TAR_CANNOT_READ_EXTRA_7Z'}
+          & $tar '-xf' $extra '-C' $dest
+          if ($LASTEXITCODE -ne 0){throw 'BUILTIN_TAR_CANNOT_EXTRACT_EXTRA_7Z'}
+          $executables=@(Get-ChildItem $dest -Recurse -File -Filter '7z*.exe')
+          foreach($exe in $executables) {Write-Host ('PORTABLE_EXE='+$exe.FullName.Substring($dest.Length+1))}
+          $exe = @(Get-ChildItem $dest -Recurse -File -Filter '7za.exe' | Select-Object -First 1)
+          if($exe.Count -eq 0){throw 'OFFICIAL_7ZA_EXE_MISSING'}
+          $tool=$exe[0].FullName
+          $output=Join-Path $env:RUNNER_TEMP 'BrotherExtractPortable'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          & $tool 'x' $brother ("-o"+$output) '-y' '-bso0' '-bsp0'
+          Write-Host ('PORTABLE_7ZA_EXITCODE='+$LASTEXITCODE)
+          if($LASTEXITCODE -ne 0){throw 'PORTABLE_7ZA_CANNOT_EXTRACT_BROTHER_SFX'}
+          $infs=@(Get-ChildItem $output -Recurse -File -Filter '*.inf')
+          $cats=@(Get-ChildItem $output -Recurse -File -Filter '*.cat')
+          Write-Host ('PCL_EXTRACTED_INF_COUNT='+$infs.Count+';CAT_COUNT='+$cats.Count)
+          foreach($f in $infs){
+            Write-Host ('INF='+$f.FullName.Substring($output.Length+1)+';SHA256='+(Get-FileHash $f.FullName -Algorithm SHA256).Hash)
+          }
+          foreach($f in $cats){
+            $s=Get-AuthenticodeSignature -FilePath $f.FullName
+            Write-Host ('CAT='+$f.FullName.Substring($output.Length+1)+';SIGNATURE='+$s.Status)
+            if ($s.Status -ne 'Valid'){throw 'CAT_NOT_VALID'}
+          }
+          if($infs.Count -ne 2 -or $cats.Count -ne 2){throw 'BROTHER_EXTRACTED_COUNT_MISMATCH'}
+          Write-Host 'PORTABLE_7ZIP_BROTHER_EXTRACTION_PASS'
