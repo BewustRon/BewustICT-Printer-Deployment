@@ -1,0 +1,69 @@
+name: Brother UPD PCL - candidate signed package inspect
+on:
+  push:
+    paths:
+      - '.github/workflows/brother-pcl-package-inspect.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - name: Inspect official Brother Universal PCL, no driver install
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $url='https://download.brother.com/welcome/dlf107285/UNIV-PCL-01101.EXE'
+          $f=Join-Path $env:RUNNER_TEMP 'UNIV-PCL-01101.EXE'
+          Write-Host "CANDIDATE_VENDOR_URL=$url"
+          try {
+            Invoke-WebRequest -Uri $url -OutFile $f -UseBasicParsing -TimeoutSec 240 -ErrorAction Stop
+          } catch {
+            Write-Host ('DOWNLOAD_FAILED=' + $_.Exception.Message)
+            throw 'Official Brother binary candidate not available; do not approve without a confirmed direct official download.'
+          }
+          $size=(Get-Item -LiteralPath $f).Length
+          Write-Host "EXE_SIZE=$size"
+          if($size -lt 5000000 -or $size -gt 22000000) {
+            throw "Unexpected package size: $size"
+          }
+          $hash=(Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash
+          Write-Host "BROTHER_EXE_SHA256=$hash"
+          $signature=Get-AuthenticodeSignature -LiteralPath $f
+          Write-Host ('BROTHER_EXE_SIGNATURE_STATUS='+$signature.Status)
+          if($signature.SignerCertificate) {
+            Write-Host ('BROTHER_EXE_SIGNER='+$signature.SignerCertificate.Subject)
+          }
+          # The EXE is a self-extracting vendor package. Inspect via 7-Zip without running it.
+          $seven='C:\Program Files\7-Zip\7z.exe'
+          if(-not (Test-Path -LiteralPath $seven)) {
+            throw '7-Zip not installed on runner: cannot inspect candidate.'
+          }
+          $list= & $seven l -slt $f 2>&1
+          Write-Host ('7ZIP_LIST_CODE='+$LASTEXITCODE)
+          $list | Select-String -Pattern '^Type =|^Method =|^Path =.*\.(inf|cat|cab|zip|dll|exe)$' |
+            Select-Object -First 65 | ForEach-Object {Write-Host ('ARCHIVE_LINE='+$_.Line)}
+          $extract=Join-Path $env:RUNNER_TEMP 'BrotherUnivPclExtract'
+          New-Item -ItemType Directory -Path $extract -Force | Out-Null
+          & $seven x $f "-o$extract" '-y' | Out-Null
+          if($LASTEXITCODE -ne 0){throw ('Brother SFX cannot be extracted using 7-Zip, code='+$LASTEXITCODE)}
+          $infs=@(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter '*.inf' -ErrorAction SilentlyContinue)
+          $cats=@(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter '*.cat' -ErrorAction SilentlyContinue)
+          Write-Host ('INF_COUNT='+$infs.Count)
+          Write-Host ('CAT_COUNT='+$cats.Count)
+          foreach($inf in ($infs | Select-Object -First 20)){
+            Write-Host ('INF_PATH='+$inf.FullName.Substring($extract.Length+1))
+            Write-Host ('INF_SHA256='+(Get-FileHash -LiteralPath $inf.FullName -Algorithm SHA256).Hash)
+            Get-Content -LiteralPath $inf.FullName -ErrorAction SilentlyContinue |
+              Select-String -Pattern 'Brother|Universal|Mono|PCL|^\s*CatalogFile\s*=' |
+              Select-Object -First 40 | ForEach-Object {Write-Host ('INF_LINE='+$_.Line.Trim())}
+          }
+          foreach($cat in ($cats | Select-Object -First 20)) {
+            $sign=Get-AuthenticodeSignature -LiteralPath $cat.FullName
+            Write-Host ('CAT_PATH='+$cat.FullName.Substring($extract.Length+1)+';SIGN='+$sign.Status+';SIGNER='+$sign.SignerCertificate.Subject)
+          }
+          if($infs.Count -lt 1 -or $cats.Count -lt 1){throw 'No signed INF/CAT found; printer deployment not approved.'}
+          Write-Host 'BROTHER_PACKAGE_INSPECT_OK: no vendor binary redistributed or executed.'
