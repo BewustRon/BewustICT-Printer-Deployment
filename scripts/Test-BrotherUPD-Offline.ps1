@@ -5,7 +5,7 @@
 .DESCRIPTION
   Original signed Brother package directly from download.brother.com.
   Verify fixed SHA256, valid Brother EXE signature, Microsoft WHCP CAT and INF hash.
-  Extract SFX as ZIP without launching Brother's installer.
+  Extract SFX using hash-pinned portable official 7-Zip Extra without running Brother's installer.
   Register via pnputil and Add-PrinterDriver, then optionally create a TCP/9100
   printer queue on TEST-NET-1, without contacting a physical printer.
 .NOTES
@@ -57,56 +57,50 @@ try {
     Check-Sha256 -Path $Exe -Expected $Hash -Label 'Brother EXE'
     Check-Signature -Path $Exe -ExpectedSigner 'Brother Industries' -Label 'Brother EXE'
 
-    Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
-    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
-    # Brother SFX: ZipFile.ExtractToDirectory kan een afwijkende EOCD/telling
-    # afwijzen. Lees de reeds geverifieerde SFX slechts eenmaal en extraheer
-    # daarna de zichtbare entries individueel, met pad- en volumelimieten.
-    $zip=[IO.Compression.ZipFile]::OpenRead($Exe)
-    try {
-        [long]$unzipped=0
-        $entries=@($zip.Entries)
-        Write-Host ("BROTHER_ZIP_ENTRIES={0}" -f $entries.Count)
-        if ($entries.Count -lt 1 -or $entries.Count -gt 10000) {throw 'UNEXPECTED_ZIP_ENTRY_COUNT'}
-        $base=[IO.Path]::GetFullPath($Extract).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-        foreach ($entry in $entries) {
-            if (-not $entry.FullName) {continue}
-            $relative=$entry.FullName.Replace('/','\')
-            $dest=[IO.Path]::GetFullPath((Join-Path $Extract $relative))
-            if (-not $dest.StartsWith($base,[StringComparison]::OrdinalIgnoreCase)) {
-                throw "ZIP_SLIP_PROTECTION_TRIGGERED $($entry.FullName)"
-            }
-            $unzipped += [long]$entry.Length
-            if ($unzipped -gt 512MB) {throw "UNCOMPRESSED_SIZE_TOO_LARGE $unzipped"}
+    # Brother's self-extracting EXE has a ZIP central directory that the
+    # built-in .NET ZIP reader cannot reliably extract. We therefore use the
+    # SHA256-pinned, portable official 7-Zip Extra build (no installation).
+    # This method was proven on a clean GitHub Actions Windows 2025 runner.
+    $SevenUrl='https://github.com/ip7z/7zip/releases/download/26.05/7z2605-extra.7z'
+    $SevenHash='F27A8F103C84785026EDCBA1F67FAF1357225DF9D19DDB0B7760D55947141BC7'
+    $SevenArchive=Join-Path $Root '7z2605-extra.7z'
+    $SevenDir=Join-Path $Root 'Portable7Zip'
+    if (-not (Test-Path -LiteralPath $SevenArchive -PathType Leaf)) {
+        Write-Host ('DOWNLOAD_OFFICIAL_PORTABLE_7ZIP=' + $SevenUrl)
+        Invoke-WebRequest -Uri $SevenUrl -OutFile $SevenArchive -UseBasicParsing -TimeoutSec 180 -ErrorAction Stop
+    }
+    Check-Sha256 -Path $SevenArchive -Expected $SevenHash -Label 'Official 7-Zip Extra 26.05'
+    $Tar=Join-Path $env:WINDIR 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $Tar -PathType Leaf)) {
+        throw 'PORTABLE_7ZIP_EXTRACTOR_UNAVAILABLE: Windows tar.exe not present.'
+    }
+    if (Test-Path -LiteralPath $SevenDir) {
+        Remove-Item -LiteralPath $SevenDir -Recurse -Force -ErrorAction Stop
+    }
+    New-Item -ItemType Directory -Path $SevenDir -Force -ErrorAction Stop | Out-Null
+    & $Tar '-xf' $SevenArchive '-C' $SevenDir
+    if ($LASTEXITCODE -ne 0) {
+        throw ('PORTABLE_7ZIP_UNPACK_FAILED: Windows tar.exe exit=' + $LASTEXITCODE)
+    }
+    # Use the x64 console release (and its companion DLLs) from the archive.
+    $SevenExe=Join-Path $SevenDir 'x64\7za.exe'
+    foreach ($part in @('x64\7za.exe','x64\7za.dll','x64\7zxa.dll')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $SevenDir $part) -PathType Leaf)) {
+            throw ('PORTABLE_7ZIP_FILE_MISSING: ' + $part)
         }
-        if (Test-Path -LiteralPath $Extract) {
-            Remove-Item -LiteralPath $Extract -Recurse -Force -ErrorAction Stop
-        }
-        [void][IO.Directory]::CreateDirectory($Extract)
-        $filesWritten=0
-        foreach ($entry in $entries) {
-            $relative=$entry.FullName.Replace('/','\')
-            $dest=[IO.Path]::GetFullPath((Join-Path $Extract $relative))
-            if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
-                [void][IO.Directory]::CreateDirectory($dest)
-                continue
-            }
-            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dest))
-            $inputStream=$null
-            $outputStream=$null
-            try {
-                $inputStream=$entry.Open()
-                $outputStream=[IO.File]::Open($dest,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
-                $inputStream.CopyTo($outputStream)
-            } finally {
-                if ($null -ne $outputStream) {$outputStream.Dispose()}
-                if ($null -ne $inputStream) {$inputStream.Dispose()}
-            }
-            $filesWritten++
-            if ($filesWritten -le 4) {Write-Host ("EXTRACTED_ENTRY="+$relative)}
-        }
-        Write-Host ("BROTHER_MANAGED_EXTRACTION_COMPLETE files={0}" -f $filesWritten)
-    } finally {$zip.Dispose()}
+    }
+    if (Test-Path -LiteralPath $Extract) {
+        Remove-Item -LiteralPath $Extract -Recurse -Force -ErrorAction Stop
+    }
+    New-Item -ItemType Directory -Path $Extract -Force -ErrorAction Stop | Out-Null
+    Write-Host 'BROTHER_SFX_EXTRACT_VIA_HASH_PINNED_PORTABLE_7ZA'
+    $SevenOutput = & $SevenExe 'x' $Exe ('-o'+$Extract) '-y' '-bso0' '-bsp0' 2>&1
+    $SevenCode=$LASTEXITCODE
+    foreach ($line in @($SevenOutput)) {
+        Write-Host ('7ZA: ' + [string]$line)
+    }
+    if ($SevenCode -ne 0) {throw ('BROTHER_SFX_UNPACK_FAILED exit=' + $SevenCode)}
+    Write-Host 'BROTHER_SFX_EXTRACT_OK'
 
     $Inf=Join-Path $Extract $InfRelative
     $Cat=Join-Path $Extract $CatRelative
