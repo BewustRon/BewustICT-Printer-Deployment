@@ -1,0 +1,48 @@
+name: Brother UPD PCL - official source discovery (read-only)
+on:
+  push:
+    paths:
+      - '.github/workflows/brother-download-inspection.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - name: Inspect official Brother download flow, without executing or redistributing software
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $urls = @(
+            'https://support.brother.com/g/b/downloadend.aspx?c=nl&lang=nl&os=115&prod=dcpl5500dn_us_eu&dlid=dlf107285_000&flang=4&type3=434',
+            'https://support.brother.com/g/b/downloadend.aspx?c=us&lang=en&os=10013&prod=dcpl5500dn_us_eu&dlid=dlf107285_000&flang=4&type3=434'
+          )
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $seen = $false
+          foreach ($url in $urls) {
+            Write-Host "SOURCE_URL=$url"
+            try {
+              $res = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 50 -MaximumRedirection 5 -ErrorAction Stop
+              Write-Host ("HTTP_STATUS={0}; FINAL_URI={1}; RESPONSE_LENGTH={2}" -f $res.StatusCode,$res.BaseResponse.ResponseUri,$res.Content.Length)
+              $html = [string]$res.Content
+              $seen = $true
+              $links = [regex]::Matches($html,'(?i)(?:https?://|//)[^"''<>\s\\]{8,260}')
+              $out = @($links | ForEach-Object { $_.Value -replace '&amp;','&' } | Where-Object {
+                $_ -match 'download\.brother|/welcome/|dlf107285|\.exe(?:\?|$)|brother\.com'
+              } | Select-Object -Unique | Select-Object -First 25)
+              foreach ($link in $out) { Write-Host ("OFFICIAL_LINK_CANDIDATE=" + $link) }
+              foreach ($line in ($html -split "[\r\n]+")) {
+                if ($line -match 'download\.brother|dlf107285|agree|licen[sc]e|downUrl|dlUrl|\.exe|<form') {
+                  $short = ($line -replace '<[^>]+>',' ' -replace '\s+',' ').Trim()
+                  if ($short.Length -gt 350) { $short = $short.Substring(0,350) }
+                  if ($short.Length -gt 0) { Write-Host ("PAGE_EVIDENCE=" + $short) }
+                }
+              }
+            } catch {
+              Write-Host ("SOURCE_FETCH_WARNING=" + $_.Exception.Message)
+            }
+          }
+          if (-not $seen) { throw 'Unable to inspect any official Brother download page.' }
+          Write-Host 'BROTHER_OFFICIAL_PAGE_INSPECTED: no installer executed, no vendor software published.'
