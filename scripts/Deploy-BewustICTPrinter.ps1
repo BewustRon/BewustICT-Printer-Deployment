@@ -6,22 +6,25 @@
   Maakt een Windows-printerqueue aan met een Standard TCP/IP-poort, ook als de
   printer nog niet bereikbaar is. Gebruikt een exact vooraf geinstalleerde
   driver, een goedgekeurd INF-driverpakket uit een HTTPS-drivercatalogus of
-  voor de Epson-pilot de officiele SHA256-gepinde Epson Universal Print Driver
-  v2.122.00 rechtstreeks vanaf de fabrikantsite.
+  voor Epson de officiele Epson Universal Print Driver v2.122.00;
+  voor Brother de officiele Mono Universal Printer (PCL) via een vastgepinde
+  en gecontroleerde Brother installer-helper.
 
   OFFLINE TEST: Actie='Offline testen' maakt drie veilige BIC TEST-queues aan
   op het gereserveerde IP 192.0.2.50 met een Windows-testdriver.
   Actie='Test opruimen' verwijdert alleen die gemarkeerde testqueues.
 
-  PILOT: Windows GitHub Actions test op Epson UPD, queueconfiguratie en ladekeuze
-  is geslaagd. NinjaOne uitrol en fysieke afdrukken zijn nog niet bewezen.
+  PILOT: Epson is offline geverifieerd in CI en op engineer-pc.
+  Brother is offline geverifieerd op een Windows CI-runner. Centrale
+  integratie en fysieke Brother-print moeten nog worden geverifieerd.
   Niet breed inzetten voordat modelcompatibiliteit en printtest zijn gedaan.
 
   Veiligheidsgrenzen:
   - Geen IPP-discovery, geen ping vereist voor installatie.
   - Download alleen HTTPS + een vooraf vastgelegde SHA256 + geldige CAT-signatuur.
-  - Epson SFX EXE wordt alleen als ZIP/archief uitgepakt, nooit uitgevoerd.
-  - Overige merken: alleen vooraf goedgekeurde ZIP met INF/CAT.
+  - Epson SFX wordt als ZIP/archief uitgepakt, niet uitgevoerd.
+  - Brother SFX wordt uitgepakt met officiele SHA256-gecontroleerde
+    portable 7-Zip. Andere merken blijven fail-closed.
   - Verwijderen en wijzigen alleen voor door dit script gemarkeerde queues.
   - Een afwijkende papierlade wordt nooit aangenomen zonder bevestiging.
   - Deze versie gebruikt RAW TCP/9100; check dat de printer dit ondersteunt.
@@ -41,7 +44,7 @@ param(
     [string]$InstellenAlsStandaardprinter = 'false'
 )
 $ErrorActionPreference = 'Stop'
-$Version = '0.8.0-PILOT'
+$Version = '0.9.0-PILOT'
 $Root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment'
 $LogDir = Join-Path $Root 'Logs'
 $PkgDir = Join-Path $Root 'DriverPackages'
@@ -303,6 +306,46 @@ function Install-EpsonVendorUPD {
     return $Name
 }
 
+
+# Brother Mono UPD PCL: signed vendor package and immutable, SHA256-checked
+# Brother installer helper already proven on Windows GitHub Actions.
+function Install-BrotherVendorUPD {
+    $Name='Brother Mono Universal Printer (PCL)'
+    if (Get-PrinterDriver -Name $Name -ErrorAction SilentlyContinue) {
+        Write-Log "Brother-driver '$Name' is reeds aanwezig; bestaande driver blijft."
+        return $Name
+    }
+    $Pin='1bdba2925df6976da0f689acad380bd614fedaa3'
+    $Hash='58A425CD7F7F0EDD9559EF8A99498F02EE1BDFB0C659972B11E93D7C3F072E63'
+    $Url="https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/$Pin/scripts/Test-BrotherUPD-Offline.ps1"
+    [void](Test-Https -Url $Url)
+    $Dir=Join-Path $PkgDir 'Brother-UPD-1.10.1.0'
+    New-Item -Path $Dir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    $Installer=Join-Path $Dir 'Brother-DriverOnly-Pinned.ps1'
+    if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
+        Write-Log "Download Brother-installer helper op vaste commit $Pin."
+        Invoke-WebRequest -Uri $Url -UseBasicParsing -OutFile $Installer -TimeoutSec 90 -ErrorAction Stop
+    }
+    $ActualHash=(Get-FileHash -LiteralPath $Installer -Algorithm SHA256 -ErrorAction Stop).Hash
+    if ($ActualHash -ne $Hash) {
+        Remove-Item -LiteralPath $Installer -Force -ErrorAction SilentlyContinue
+        throw "Brother helper SHA256 ongeldig: $ActualHash"
+    }
+    Write-Log 'Brother helper gecontroleerd: installatiestart zonder printerdetectie.'
+    $PowerShell=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $Output=& $PowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Installer -Actie DriverOnly 2>&1
+    $Exit=$LASTEXITCODE
+    foreach($Line in @($Output)){Write-Log ('BROTHER_INSTALL: '+[string]$Line)}
+    if($Exit -ne 0){throw "Brother driver-only installatie faalde, exitcode=$Exit"}
+    if(-not (@($Output|ForEach-Object {[string]$_}) -match '^BROTHER_DRIVER_ONLY_OK$')) {
+        throw 'Geen BROTHER_DRIVER_ONLY_OK ontvangen van gevalideerde installer-helper.'
+    }
+    $Installed=Get-PrinterDriver -Name $Name -ErrorAction Stop
+    if($Installed.Name -ne $Name){throw "Brother-driver '$Name' niet geregistreerd."}
+    Write-Log "BROTHER_UPD_DRIVER_OK: $Name"
+    return $Name
+}
+
 function Install-ApprovedDriver {
     param([string]$Brand,[string]$CatalogUrl)
     if ([string]::IsNullOrWhiteSpace($CatalogUrl)) {
@@ -558,6 +601,12 @@ try {
         'Cassette 4' {4}
         default { throw "Ongeldige papierlade '$Papierlade'." }
     }
+    # De geteste Brother Universal PCL-driver is monochroom. Specifieke
+    # Brother-papierladen zijn voor dit model nog niet gemapt.
+    if ($PrinterMerk -eq 'Brother' -and [string]::IsNullOrWhiteSpace($DriverNaam)) {
+        if ($KleurAfdrukken -ne 'Zwart-wit') { throw 'Brother Universal PCL ondersteunt alleen zwart-wit.' }
+        if ($Papierlade -ne 'Automatisch') { throw 'Brother-lades zijn nog niet gevalideerd. Gebruik Automatisch.' }
+    }
     $ResolvedDriverName = $DriverNaam.Trim()
     if ($ResolvedDriverName) {
         if (-not (Get-PrinterDriver -Name $ResolvedDriverName -ErrorAction SilentlyContinue)) {
@@ -566,6 +615,8 @@ try {
         Write-Log "Gebruik reeds geinstalleerde driver '$ResolvedDriverName'."
     } elseif ($PrinterMerk -eq 'Epson') {
         $ResolvedDriverName = Install-EpsonVendorUPD
+    } elseif ($PrinterMerk -eq 'Brother') {
+        $ResolvedDriverName = Install-BrotherVendorUPD
     } else {
         $ResolvedDriverName = Install-ApprovedDriver -Brand $PrinterMerk -CatalogUrl $DriverCatalogusUrl
     }
