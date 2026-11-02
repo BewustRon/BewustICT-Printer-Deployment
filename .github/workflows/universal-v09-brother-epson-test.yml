@@ -1,0 +1,42 @@
+name: Unified v0.9 Brother and Epson offline regression
+on:
+  push:
+    paths:
+      - '.github/workflows/universal-v09-brother-epson-test.yml'
+      - 'scripts/Deploy-BewustICTPrinter-v0.9.0-PILOT.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  brother:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Brother universal PCL via central script, unreachable IP
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\scripts\Deploy-BewustICTPrinter-v0.9.0-PILOT.ps1 -Actie Installeren -PrinterNaam 'BIC V09 CI - Brother Mono' -PrinterIpAdres '192.0.2.50' -PrinterMerk Brother -KleurAfdrukken 'Zwart-wit' -DubbelzijdigAfdrukken Uit -Papierformaat A4 -Papierlade Automatisch
+          if (-not $?) {throw 'Unified Brother offline deployment failed'}
+          $p=Get-Printer -Name 'BIC V09 CI - Brother Mono' -ErrorAction Stop
+          if ($p.DriverName -ne 'Brother Mono Universal Printer (PCL)'){throw 'Wrong Brother driver'}
+          $c=Get-PrintConfiguration -PrinterName $p.Name -ErrorAction Stop
+          if ($c.Color -or [string]$c.DuplexingMode -ne 'OneSided' -or [string]$c.PaperSize -ne 'A4'){throw 'Wrong Brother print defaults'}
+          Write-Host 'UNIFIED_V09_BROTHER_OK'
+  epson:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Epson regression: color and Cassette 2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\scripts\Deploy-BewustICTPrinter-v0.9.0-PILOT.ps1 -Actie Installeren -PrinterNaam 'BIC V09 CI - Epson Kleur' -PrinterIpAdres '192.0.2.50' -PrinterMerk Epson -KleurAfdrukken Kleur -DubbelzijdigAfdrukken Uit -Papierformaat A4 -Papierlade 'Cassette 2'
+          if (-not $?) {throw 'Unified Epson offline deployment failed'}
+          $p=Get-Printer -Name 'BIC V09 CI - Epson Kleur' -ErrorAction Stop
+          if ($p.DriverName -ne 'EPSON Universal Print Driver'){throw 'Wrong Epson driver'}
+          $c=Get-PrintConfiguration -PrinterName $p.Name -ErrorAction Stop
+          if (-not $c.Color -or [string]$c.PaperSize -ne 'A4'){throw 'Wrong Epson print defaults'}
+          Write-Host 'UNIFIED_V09_EPSON_REGRESSION_OK'
