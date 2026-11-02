@@ -1,0 +1,33 @@
+name: NinjaOne v0.9 launcher - Brother offline CI
+on:
+  push:
+    paths:
+      - '.github/workflows/ninjaone-v09-brother-bootstrap-test.yml'
+      - 'scripts/NinjaOne-Printer-Bootstrap-v0.9.0-PILOT.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test pinned SHA256 launcher with NinjaOne environment variables
+        shell: powershell
+        env:
+          actie: Installeren
+          printerNaam: BIC NINJA V09 - Brother
+          printerIpAdres: 192.0.2.50
+          printerMerk: Brother
+          kleurAfdrukken: Zwart-wit
+          dubbelzijdigAfdrukken: Uit
+          papierformaat: A4
+          papierlade: Automatisch
+          instellenAlsStandaardprinter: 'false'
+        run: |
+          & .\scripts\NinjaOne-Printer-Bootstrap-v0.9.0-PILOT.ps1
+          if (-not $?) { throw 'Launcher failed' }
+          $printer=Get-Printer -Name 'BIC NINJA V09 - Brother' -ErrorAction Stop
+          if($printer.DriverName -ne 'Brother Mono Universal Printer (PCL)'){throw "Invalid driver '$($printer.DriverName)'"}
+          Write-Host 'NINJA_V09_BROTHER_BOOTSTRAP_OK'
