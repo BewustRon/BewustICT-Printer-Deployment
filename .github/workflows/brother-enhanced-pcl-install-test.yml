@@ -29,6 +29,16 @@ jobs:
           $sig=Get-AuthenticodeSignature -LiteralPath $exe
           Write-Host "BROTHER_ENHANCED_EXE_SIGNATURE=$($sig.Status);SIGNER=$($sig.SignerCertificate.Subject)"
           if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Brother Industries') { throw 'EXE_SIGNATURE_NOT_BROTHER' }
+          try {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $dotnetArchive=[IO.Compression.ZipFile]::OpenRead($exe)
+            try {
+              Write-Host ("DOTNET_ZIP_OPEN_OK entries="+$dotnetArchive.Entries.Count)
+              $dotnetArchive.Entries | Select-Object -First 15 | ForEach-Object { Write-Host ("DOTNET_ENTRY="+$_.FullName) }
+            } finally { $dotnetArchive.Dispose() }
+          } catch {
+            Write-Host ("DOTNET_ZIP_OPEN_UNAVAILABLE="+$_.Exception.Message)
+          }
           $seven='C:\Program Files\7-Zip\7z.exe'
           if(-not (Test-Path $seven)){$seven=(Get-Command 7z.exe -ErrorAction Stop).Source}
           $extract=Join-Path $root 'expanded'
