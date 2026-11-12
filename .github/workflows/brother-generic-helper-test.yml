@@ -29,7 +29,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $output= & .\scripts\Install-BrotherGenericPCL.ps1 2>&1
+          $output= & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\Install-BrotherGenericPCL.ps1 2>&1
           $code=$LASTEXITCODE
           foreach($line in @($output)) {Write-Host ([string]$line)}
           if($code -ne 0){throw "BROTHER_GENERIC_HELPER_EXIT=$code"}
