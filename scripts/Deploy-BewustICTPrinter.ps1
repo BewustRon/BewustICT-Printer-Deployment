@@ -44,7 +44,7 @@ param(
     [string]$InstellenAlsStandaardprinter = 'false'
 )
 $ErrorActionPreference = 'Stop'
-$Version = '1.2.0-PILOT'
+$Version = '1.2.1-PILOT'
 $Root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment'
 $LogDir = Join-Path $Root 'Logs'
 $PkgDir = Join-Path $Root 'DriverPackages'
@@ -428,7 +428,16 @@ function Install-ApprovedDriver {
         Remove-Item -LiteralPath $ZipFile -Force -ErrorAction SilentlyContinue
         throw "SHA256-verificatie mislukt voor '$Brand'!"
     }
-    $Extracted = Join-Path $Dir 'Expanded'
+    # Keep the verified OEM ZIP and diagnostic logs in the existing package cache,
+    # but extract under a SHORT, SYSTEM-managed path. Kyocera's ZIP includes nested
+    # device metadata: the old SHA256 + GUID staging path exceeded Win32 MAX_PATH
+    # (275 characters on PC-JOHNNYWEIJER) and .NET Framework ZipFile failed.
+    # A 96-bit SHA256 prefix isolates package work folders; the full 256-bit hash
+    # is still checked both on the ZIP and in the completed extraction marker.
+    $WorkParent = Join-Path $env:ProgramData 'BICPD'
+    $WorkRoot = Join-Path $WorkParent ($Hash.Substring(0,24).ToLowerInvariant())
+    New-Item -ItemType Directory -Path $WorkRoot -Force -ErrorAction Stop | Out-Null
+    $Extracted = Join-Path $WorkRoot 'Expanded'
     Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
     $Archive = [IO.Compression.ZipFile]::OpenRead($ZipFile)
@@ -450,7 +459,8 @@ function Install-ApprovedDriver {
     $ExtractionValid = (Test-Path -LiteralPath $Marker -PathType Leaf) -and
         ((Get-Content -LiteralPath $Marker -Raw -ErrorAction SilentlyContinue).Trim() -eq $Hash)
     if (-not $ExtractionValid) {
-        $StageDir = Join-Path $Dir ('Expanded-staging-' + [guid]::NewGuid().ToString('N'))
+        $StageDir = Join-Path $WorkRoot ('S-' + [guid]::NewGuid().ToString('N'))
+        Write-Log "Pak '$Brand' uit in verkort stagingpad ($($StageDir.Length) tekens) om Windows MAX_PATH te vermijden."
         try {
             [IO.Compression.ZipFile]::ExtractToDirectory($ZipFile, $StageDir)
             $StageInf = Get-SafeChildPath -Base $StageDir -Relative $InfRelative
