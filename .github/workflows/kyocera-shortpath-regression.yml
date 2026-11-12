@@ -1,0 +1,72 @@
+name: Pilot v1.2.1 - Kyocera MAX_PATH regression and HP
+on:
+  push:
+    branches:
+      - fix/kyocera-win32-maxpath-extract-20261112
+    paths:
+      - scripts/Deploy-BewustICTPrinter.ps1
+      - .github/workflows/kyocera-shortpath-regression.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  zero-touch-offline:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: Kyocera
+            driver: Kyocera Generic color KX
+            package_hash: 8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E
+          - brand: HP
+            driver: HP Universal Printing PCL 6
+            package_hash: EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install signed manufacturer driver and TCP queue on clean Windows without device
+        shell: powershell
+        env:
+          VENDOR: ${{ matrix.brand }}
+          EXPECTED_DRIVER: ${{ matrix.driver }}
+          OEM_HASH: ${{ matrix.package_hash }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $name='BIC CI '+$env:VENDOR+' Offline 1.2.1'
+          $script=Join-Path $env:GITHUB_WORKSPACE 'scripts\Deploy-BewustICTPrinter.ps1'
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          $arguments=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$script,
+            '-Actie','Installeren','-PrinterNaam',$name,
+            '-PrinterIpAdres','192.0.2.50','-PrinterMerk',$env:VENDOR,
+            '-KleurAfdrukken','Kleur','-DubbelzijdigAfdrukken','Uit',
+            '-Papierformaat','A4','-Papierlade','Automatisch')
+          Write-Host ('START_VENDOR='+$env:VENDOR)
+          & $ps @arguments
+          $result=$LASTEXITCODE
+          if($result -ne 0){throw "PRINTER_V121_SCRIPT_FAILED: $($env:VENDOR), exit=$result"}
+          Import-Module PrintManagement -ErrorAction Stop
+          $printer=Get-Printer -Name $name -ErrorAction Stop
+          if($printer.DriverName -ne $env:EXPECTED_DRIVER){throw "DRIVER_MISMATCH $($printer.DriverName)"}
+          $port=Get-PrinterPort -Name $printer.PortName -ErrorAction Stop
+          if($port.PrinterHostAddress -ne '192.0.2.50'){throw "PORT_IP_MISMATCH"}
+          $cfg=Get-PrintConfiguration -PrinterName $name -ErrorAction Stop
+          if($cfg.PaperSize -ne 'A4'){throw "DEFAULT_PAPER_SIZE_INVALID"}
+          $work=Join-Path (Join-Path $env:ProgramData 'BICPD') $env:OEM_HASH.Substring(0,24).ToLowerInvariant()
+          $expanded=Join-Path $work 'Expanded'
+          $marker=Join-Path $expanded '.bic-expanded-sha256'
+          if(-not (Test-Path -LiteralPath $marker -PathType Leaf)){throw "NEW_SHORT_CACHE_MARKER_MISSING"}
+          if((Get-Content -LiteralPath $marker -Raw).Trim() -ne $env:OEM_HASH){throw "EXTRACTION_HASH_MARKER_MISMATCH"}
+          if($env:VENDOR -eq 'Kyocera'){
+            $metadata=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Filter '*.devicemetadata-ms' -ErrorAction Stop)
+            Write-Host ("KYOCERA_EXTRACTED_DEVICE_METADATA_FILES="+$metadata.Count)
+            if($metadata.Count -eq 0){throw "KYOCERA_DEVICE_METADATA_NOT_EXTRACTED"}
+            $maxLength=($metadata | Measure-Object -Property @{Expression={$_.FullName.Length}} -Maximum).Maximum
+            Write-Host ('KYOCERA_EXTRACTED_METADATA_SAMPLE='+$metadata[0].FullName)
+            if(-not (Test-Path -LiteralPath $metadata[0].FullName)){throw "NESTED_METADATA_UNREADABLE"}
+          }
+          Write-Host ("VERIFIED_DRIVER="+$printer.DriverName)
+          Write-Host ("VERIFIED_WORK_PATH="+$expanded)
+          Write-Host ("VERIFIED_DEFAULT_COLOR="+$cfg.Color)
+          Write-Host ("VERIFIED_DEFAULT_DUPLEX="+$cfg.DuplexingMode)
+          Write-Host ('OFFLINE_OEM_SHORTPATH_PRINTER_READY='+$env:VENDOR)
