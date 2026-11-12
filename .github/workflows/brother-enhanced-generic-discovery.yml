@@ -1,0 +1,46 @@
+name: Brother Enhanced Generic PCL manufacturer download discovery
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/brother-enhanced-generic-discovery.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  discover:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - name: Find Brother official Enhanced Generic PCL x64 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $urls = @(
+            'https://support.brother.com/g/b/downloadlist.aspx?c=nl&lang=nl&os=10086&prod=dcpl5500dn_us_eu',
+            'https://support.brother.com/g/b/downloadlist.aspx?c=eu_ot&lang=en&os=10086&prod=hll2460dn_eu_as'
+          )
+          foreach ($url in $urls) {
+            Write-Host "SOURCE=$url"
+            try {
+              $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
+              Write-Host "STATUS=$($r.StatusCode); BYTES=$($r.Content.Length)"
+              $html = [string]$r.Content
+              foreach($term in @('Enhanced Generic PCL Driver','Uitgebreide algemene PCL-driver','genp5e','downloadinfo.aspx')) {
+                $index = $html.IndexOf($term, [StringComparison]::OrdinalIgnoreCase)
+                Write-Host ("FIND_"+$term+"="+$index)
+                if($index -ge 0){
+                  $start=[Math]::Max(0, $index-1400)
+                  $count=[Math]::Min(3500, $html.Length-$start)
+                  Write-Host ("CONTEXT="+$html.Substring($start,$count))
+                }
+              }
+              $links=[regex]::Matches($html,'(?i)(?:href\s*=\s*["''][^"'']+|downloadinfo\.aspx\?[^"'']+|genp5e[^"'']+)')
+              $links | Select-Object -First 60 | ForEach-Object { Write-Host ("LINK="+$_.Value) }
+            } catch {
+              Write-Host ("FETCH_ERROR="+$_.Exception.Message)
+            }
+          }
+          Write-Host 'BROTHER_OFFICIAL_DOWNLOAD_SEARCH_COMPLETE'
