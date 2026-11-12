@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   printui:
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -20,7 +20,7 @@ jobs:
             url: https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip
             sha: EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2
             inf: hpcu360u.inf
-            model: HP Universal Printing PCL 6
+            model: HP Universal Printing PCL 6 (v8.2.0)
           - brand: Kyocera
             url: https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip
             sha: 8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E
