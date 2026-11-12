@@ -1,0 +1,45 @@
+name: NinjaOne v1.2.1 Kyocera cold bootstrap offline
+on:
+  push:
+    branches:
+      - fix/kyocera-win32-maxpath-extract-20261112
+    paths:
+      - scripts/NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+      - .github/workflows/kyocera-v121-bootstrap-integration.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kyocera-bootstrap:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run exact SHA256-pinned NinjaOne bootstrap with real Kyocera package and unreachable printer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI Kyocera Offline Ninja 121'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='Kyocera'
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw "NINJAONE_121_KYOCERA_SCRIPT_FAILED"}
+          Import-Module PrintManagement -ErrorAction Stop
+          $p=Get-Printer -Name $env:printerNaam -ErrorAction Stop
+          if($p.DriverName -ne 'Kyocera Generic color KX') {throw "INCORRECT_KYOCERA_DRIVER"}
+          $port=Get-PrinterPort -Name $p.PortName -ErrorAction Stop
+          if($port.PrinterHostAddress -ne '192.0.2.50') {throw "WRONG_OFFLINE_TCP_PORT"}
+          $hash='8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E'
+          $work=Join-Path (Join-Path $env:ProgramData 'BICPD') $hash.Substring(0,24).ToLowerInvariant()
+          $marker=Join-Path (Join-Path $work 'Expanded') '.bic-expanded-sha256'
+          if(-not (Test-Path -LiteralPath $marker -PathType Leaf)){throw "SHORT_PATH_CACHE_MISSING"}
+          if((Get-Content $marker -Raw).Trim() -ne $hash){throw "HASH_MARKER_INVALID"}
+          Write-Host 'NINJAONE_121_KYOCERA_OFFLINE_ZERO_TOUCH_OK'

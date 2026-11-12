@@ -1,0 +1,32 @@
+name: v1.2.1 central printer raw pin and parser check
+on:
+  push:
+    branches:
+      - fix/kyocera-win32-maxpath-extract-20261112
+    paths:
+      - .github/workflows/printer-v121-raw-pin.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hash:
+    runs-on: windows-2025
+    timeout-minutes: 4
+    steps:
+      - name: Verify exact central script raw SHA256 and Windows PowerShell 5.1 parser
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $commit='6372c59840d4994eb44e58cf0149362e4224ec4a'
+          $url='https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/'+$commit+'/scripts/Deploy-BewustICTPrinter.ps1'
+          $target=Join-Path $env:RUNNER_TEMP 'printer-v121-raw.ps1'
+          Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 90
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($target,[ref]$tokens,[ref]$errors)
+          if($errors.Count){
+            $errors | ForEach-Object { Write-Host $_ }
+            throw 'POWERSHELL_PARSER_FAILED'
+          }
+          Write-Host ('CENTRAL_COMMIT='+$commit)
+          Write-Host ('CENTRAL_RAW_SHA256='+(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash)
+          Write-Host 'CENTRAL_PARSER_OK'
