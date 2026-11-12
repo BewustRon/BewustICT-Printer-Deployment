@@ -1,0 +1,29 @@
+name: Release raw script SHA256 for NinjaOne pin
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-zero-touch-publisher-trust-20261112
+    paths:
+      - .github/workflows/oem-release-pin-check.yml
+      - scripts/Deploy-BewustICTPrinter.ps1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hash:
+    runs-on: windows-2025
+    timeout-minutes: 3
+    steps:
+      - name: SHA256 of exact immutable raw central PowerShell script
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $env:RUNNER_TEMP 'printer-central-raw.ps1'
+          $url='https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/'+$env:GITHUB_SHA+'/scripts/Deploy-BewustICTPrinter.ps1'
+          Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $path -TimeoutSec 90
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors | ForEach-Object {Write-Host $_};throw 'RAW_PARSER_FAILED'}
+          Write-Host ('CENTRAL_IMMUTABLE_COMMIT='+$env:GITHUB_SHA)
+          Write-Host ('CENTRAL_RAW_SHA256='+(Get-FileHash $path -Algorithm SHA256).Hash)
+          Write-Host 'RAW_CENTRAL_PARSER_OK'
