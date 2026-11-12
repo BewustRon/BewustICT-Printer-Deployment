@@ -33,8 +33,16 @@ jobs:
           if(-not (Test-Path $seven)){$seven=(Get-Command 7z.exe -ErrorAction Stop).Source}
           $extract=Join-Path $root 'expanded'
           New-Item -ItemType Directory -Path $extract -Force | Out-Null
-          & $seven x $exe ('-o'+$extract) '-y' '-bso0'
-          if($LASTEXITCODE -ne 0){throw "EXTRACT_FAILED $LASTEXITCODE"}
+          Write-Host '=== 7ZIP FORMAT LIST ==='
+          & $seven l '-slt' $exe | Select-Object -First 110 | ForEach-Object { Write-Host $_ }
+          foreach($format in @('zip','7z','cab','*')) {
+            Write-Host ('TRY_FORMAT='+$format)
+            & $seven x ('-t'+$format) $exe ('-o'+$extract) '-y' '-bso0' '-bse0' 2>$null
+            Write-Host ('RESULT='+$format+' EXIT='+$LASTEXITCODE)
+            $found=@(Get-ChildItem $extract -Recurse -Filter '*.inf' -File -ErrorAction SilentlyContinue)
+            if($found.Count -gt 0) { Write-Host ('EXTRACT_SUCCESS_FORMAT='+$format); break }
+          }
+          if(-not @(Get-ChildItem $extract -Recurse -Filter '*.inf' -File -ErrorAction SilentlyContinue).Count) { throw 'NO_INF_AFTER_SFX_EXTRACT' }
           $infs=@(Get-ChildItem $extract -Recurse -Filter '*.inf' -File)
           $cats=@(Get-ChildItem $extract -Recurse -Filter '*.cat' -File)
           Write-Host "INFS=$($infs.Count) CATS=$($cats.Count)"
