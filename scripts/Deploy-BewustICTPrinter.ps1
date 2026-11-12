@@ -407,8 +407,33 @@ function Install-ApprovedDriver {
         }
     }
     finally { $Archive.Dispose() }
-    if (-not (Test-Path -LiteralPath $Extracted)) {
-        Expand-Archive -LiteralPath $ZipFile -DestinationPath $Extracted -ErrorAction Stop
+    # .NET ZIP extraction is much faster than Expand-Archive for the ~251 MB
+    # Kyocera OEM package. Stage transactionally so a failed prior extraction
+    # cannot be mistaken for a valid cache hit on the next NinjaOne run.
+    $Marker = Join-Path $Extracted '.bic-expanded-sha256'
+    $ExtractionValid = (Test-Path -LiteralPath $Marker -PathType Leaf) -and
+        ((Get-Content -LiteralPath $Marker -Raw -ErrorAction SilentlyContinue).Trim() -eq $Hash)
+    if (-not $ExtractionValid) {
+        $StageDir = Join-Path $Dir ('Expanded-staging-' + [guid]::NewGuid().ToString('N'))
+        try {
+            [IO.Compression.ZipFile]::ExtractToDirectory($ZipFile, $StageDir)
+            $StageInf = Get-SafeChildPath -Base $StageDir -Relative $InfRelative
+            $StageCat = Get-SafeChildPath -Base $StageDir -Relative $CatRelative
+            if (-not (Test-Path -LiteralPath $StageInf -PathType Leaf) -or
+                -not (Test-Path -LiteralPath $StageCat -PathType Leaf)) {
+                throw "Uitgepakt archief voor '$Brand' mist de geselecteerde INF/CAT."
+            }
+            [IO.File]::WriteAllText((Join-Path $StageDir '.bic-expanded-sha256'),$Hash,[Text.Encoding]::ASCII)
+            if (Test-Path -LiteralPath $Extracted) {
+                Remove-Item -LiteralPath $Extracted -Recurse -Force -ErrorAction Stop
+            }
+            Move-Item -LiteralPath $StageDir -Destination $Extracted -ErrorAction Stop
+            Write-Log "Goedgekeurd ZIP-pakket '$Brand' uitgepakt met .NET ZipFile."
+        } finally {
+            if (Test-Path -LiteralPath $StageDir) {
+                Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
     $InfPath = Get-SafeChildPath -Base $Extracted -Relative $InfRelative
     $CatPath = Get-SafeChildPath -Base $Extracted -Relative $CatRelative
