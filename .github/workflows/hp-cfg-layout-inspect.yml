@@ -40,7 +40,7 @@ jobs:
               })
               foreach($entry in $matches | Select-Object -First 90){
                 Write-Host ("ENTRY="+$src.key+"/"+$entry.FullName+" BYTES="+$entry.Length)
-                if($src.key -eq 'UPD' -and $entry.FullName -match '(?i)\.(cfg|cfm|cf_)$' -and $entry.Length -lt 300000){
+                if($src.key -eq 'UPD' -and $entry.FullName -match '(?i)\.(cfg|cfm|cf_)$' -and $entry.Length -lt 1000000){
                   $s=$entry.Open()
                   try {
                     $buf=New-Object byte[] ([Math]::Min(80,[int]$entry.Length))
