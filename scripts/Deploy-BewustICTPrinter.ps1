@@ -354,7 +354,7 @@ function Install-ApprovedDriver {
     [void](Test-Https -Url $CatalogUrl)
     Write-Log "Haal drivercatalogus op via HTTPS: $CatalogUrl"
     $Catalog = Invoke-RestMethod -Uri $CatalogUrl -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
-    if ([int]$Catalog.schemaVersion -ne 1) { throw 'Niet-ondersteunde catalogusversie.' }
+    if ([int]$Catalog.schemaVersion -ne 2) { throw 'Niet-ondersteunde catalogusversie.' }
     $Entries = $Catalog.drivers
     if (-not $Entries) { throw 'Drivercatalogus bevat geen drivers.' }
     $Entry = $Entries.PSObject.Properties[$Brand]
