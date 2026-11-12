@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "note": "HP UPD PCL6 and Kyocera KX Generic color drivers are PILOT approved for auto deployment only. Both OEM packages and exact publisher leaf certificates pinned and driver registration verified on isolated Windows CI 2026-11-12. Requires LocalMachine TrustedPublisher leaf trust (not Root). Physical output and printer language compatibility not yet verified.",
+  "schemaVersion": 2,
+  "note": "HP UPD PCL6 and Kyocera KX Generic color drivers are PILOT approved for auto deployment only. Both OEM packages and exact publisher leaf certificates pinned and driver registration verified on isolated Windows CI 2026-11-12. Requires LocalMachine TrustedPublisher leaf trust (not Root). Physical output and printer language compatibility not yet verified. IMPORTANT: schema v2 intentionally fails closed in old v0.9/v1.0 pinned NinjaOne launchers; update to v1.1.0 bootstrap for HP/Kyocera.",
   "drivers": {
     "HP": {
       "status": "approved",
