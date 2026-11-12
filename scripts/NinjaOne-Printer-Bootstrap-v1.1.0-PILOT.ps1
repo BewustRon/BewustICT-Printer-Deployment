@@ -8,8 +8,8 @@
   NinjaOne Script Variables are inherited in the PowerShell child process.
 #>
 $ErrorActionPreference='Stop'
-$Commit='0dcbb72b4e6154a7db94718b97d2750adc5354de'
-$ExpectedSha256='4F13D5F1BB5B603A37A08E1D9E4F36544F6AFB0B0E352E7D180D4EF9EE6496D4'
+$Commit='e1e0138be191f19be6201ab7c0af1e05aa7ec5b0'
+$ExpectedSha256='890899A93B4B655C4DFE82494C5E14106614558CBA456C954C77FDE71ABB9F7C'
 $Url="https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/$Commit/scripts/Deploy-BewustICTPrinter.ps1"
 $Folder=Join-Path $env:ProgramData 'BewustICT\PrinterDeployment\Launcher'
 $File=Join-Path $Folder ('Deploy-'+[guid]::NewGuid().ToString('N')+'.ps1')
