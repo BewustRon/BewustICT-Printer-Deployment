@@ -1,0 +1,75 @@
+name: Brother Enhanced Generic PCL x64 offline driver pilot
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/brother-enhanced-pcl-install-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect-install:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - name: Download official Brother Enhanced Generic PCL and check signatures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          $url='https://download.brother.com/welcome/dlf103331/genp5e-64-dut-109.EXE'
+          $root=Join-Path $env:RUNNER_TEMP 'BrotherEnhancedGenericPCL'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          $exe=Join-Path $root 'brother.exe'
+          Invoke-WebRequest -Uri $url -OutFile $exe -TimeoutSec 120
+          $hash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          Write-Host "BROTHER_ENHANCED_EXE_BYTES=$((Get-Item $exe).Length)"
+          Write-Host "BROTHER_ENHANCED_EXE_SHA256=$hash"
+          $sig=Get-AuthenticodeSignature -LiteralPath $exe
+          Write-Host "BROTHER_ENHANCED_EXE_SIGNATURE=$($sig.Status);SIGNER=$($sig.SignerCertificate.Subject)"
+          if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Brother Industries') { throw 'EXE_SIGNATURE_NOT_BROTHER' }
+          $seven='C:\Program Files\7-Zip\7z.exe'
+          if(-not (Test-Path $seven)){$seven=(Get-Command 7z.exe -ErrorAction Stop).Source}
+          $extract=Join-Path $root 'expanded'
+          New-Item -ItemType Directory -Path $extract -Force | Out-Null
+          & $seven x $exe ('-o'+$extract) '-y' '-bso0'
+          if($LASTEXITCODE -ne 0){throw "EXTRACT_FAILED $LASTEXITCODE"}
+          $infs=@(Get-ChildItem $extract -Recurse -Filter '*.inf' -File)
+          $cats=@(Get-ChildItem $extract -Recurse -Filter '*.cat' -File)
+          Write-Host "INFS=$($infs.Count) CATS=$($cats.Count)"
+          foreach($inf in $infs){
+            Write-Host ('INF='+$inf.FullName.Substring($extract.Length+1))
+            $lines=Get-Content $inf.FullName
+            $lines | Select-String -Pattern 'Brother PCL|Generic|^DriverVer\s*=|^CatalogFile\s*=|^Class\s*=' | Select-Object -First 60 | ForEach-Object { Write-Host $_.Line }
+          }
+          foreach($cat in $cats) {
+            $s=Get-AuthenticodeSignature $cat.FullName
+            Write-Host "CAT=$($cat.FullName.Substring($extract.Length+1)); STATUS=$($s.Status); SIGNER=$($s.SignerCertificate.Subject)"
+          }
+          Write-Host 'BROTHER_ENHANCED_OEM_PACKAGE_INSPECTION_DONE'
+      - name: Stage Brother generic PCL driver without network discovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'BrotherEnhancedGenericPCL'
+          $extract=Join-Path $root 'expanded'
+          $infs=@(Get-ChildItem $extract -Recurse -Filter '*.inf' -File)
+          foreach($inf in $infs){
+            Write-Host "STAGING=$($inf.FullName)"
+            & pnputil.exe /add-driver $inf.FullName
+            Write-Host "PNP_EXIT=$LASTEXITCODE"
+          }
+          Import-Module PrintManagement
+          $names=@('Brother PCL5e Driver','Brother PCL5e Generic Driver','Brother PCL6 Driver','Brother PCL6 Generic Driver')
+          foreach($name in $names){
+            Write-Host ("CANDIDATE="+$name)
+            try {
+              Add-PrinterDriver -Name $name -ErrorAction Stop
+              Write-Host ("REGISTERED="+$name)
+            } catch {
+              Write-Host ("REJECTED="+$name+" DETAIL="+$_.Exception.Message)
+            }
+          }
+          Get-PrinterDriver | Where-Object { $_.Name -match 'Brother PCL|Generic' } | ForEach-Object { Write-Host ("WINDOWS_PRINT_DRIVER="+$_.Name) }
+          Write-Host 'BROTHER_ENHANCED_DRIVER_STAGE_COMPLETE'
