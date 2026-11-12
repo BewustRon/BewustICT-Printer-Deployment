@@ -1,0 +1,38 @@
+name: HP Printer Administrator Resource Kit v1.9.2 inspection
+on:
+  push:
+    branches:
+      - fix/hp-upd-offline-color-duplex-tray3-20261112
+    paths:
+      - .github/workflows/hp-park-inspect.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Examine official HP PARK archive for preconfiguration tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          $url='https://ftp.hp.com/pub/softlib/software13/printers/UPD/HP-PARK-v1.9.2.zip'
+          $zip=Join-Path $env:RUNNER_TEMP 'HP-PARK-v1.9.2.zip'
+          & "$env:WINDIR\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 --output $zip $url
+          if($LASTEXITCODE -ne 0){throw "OFFICIAL_HP_PARK_DOWNLOAD_FAILED_$LASTEXITCODE"}
+          $sha=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          Write-Host ("HP_PARK_ZIP_BYTES="+(Get-Item $zip).Length)
+          Write-Host ("HP_PARK_ZIP_SHA256="+$sha)
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            Write-Host ("ZIP_TOTAL_ENTRIES="+$archive.Entries.Count)
+            $archive.Entries |
+              Where-Object { $_.FullName -match 'DCU|HPBCFG|\.cfm$|\.cfg$|\.pdf$|Help|Command|README|Support' } |
+              Select-Object -First 80 |
+              ForEach-Object {Write-Host ("HP_PARK_CONTENT="+$_.FullName)}
+          } finally { $archive.Dispose() }
+          Write-Host 'HP_PARK_INSPECTION_DONE'
