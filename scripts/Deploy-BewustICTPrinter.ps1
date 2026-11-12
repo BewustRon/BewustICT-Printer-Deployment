@@ -44,7 +44,7 @@ param(
     [string]$InstellenAlsStandaardprinter = 'false'
 )
 $ErrorActionPreference = 'Stop'
-$Version = '1.1.0-PILOT'
+$Version = '1.2.0-PILOT'
 $Root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment'
 $LogDir = Join-Path $Root 'Logs'
 $PkgDir = Join-Path $Root 'DriverPackages'
@@ -564,12 +564,12 @@ function Install-ApprovedDriver {
     return $Name
 }
 # Ladekeuze via een generieke, op de Windows-spooler gevalideerde DEVMODE helper.
-# GitHub helper is vastgepind op de commit die in CI succesvol Cassette 1/2 schreef.
+# Pinned tray helper resolves physical-numbered tray aliases from the actual offline driver (HP Tray/Lade, Epson Cassette); never guesses IDs.
 function Set-CassetteStrict {
     param([string]$Name,[int]$Number)
     if ($Number -lt 1 -or $Number -gt 4) { throw "Ongeldig cassettenummer '$Number'." }
     $TrayName = 'Cassette {0}' -f $Number
-    $Pin = '787eb04801725623691d65d9963b5bb80bf2f55b'
+    $Pin = '911fd30174cce20bda1e7f515aaabd5ffd33eb06'
     $Url = 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/{0}/scripts/Set-BewustICTPrinterTray.ps1' -f $Pin
     [void](Test-Https -Url $Url)
     $Tools = Join-Path $Root 'Tools'
@@ -588,7 +588,8 @@ function Set-CassetteStrict {
         }
         if ($Code -ne 0) { throw "Papierlade $TrayName kon niet door de spooler worden $Action voor '$Name' (exit $Code)." }
     }
-    Write-Log "CASSETTE_CONFIRMED: '$Name' = '$TrayName' als globale Windows-printerstandaard; fysiek afdrukken blijft te testen."
+$LogTray = "Cassette $Number"
+    Write-Log "TRAY_STRICT_CONFIRMED: '$Name' = '$TrayName' als globale Windows-printerstandaard; fysiek afdrukken blijft te testen."
 }
 
 # Per-user standaardprinter: beheerde taak, geen HKCU-aanpassing vanuit SYSTEM.
