@@ -315,7 +315,7 @@ function Install-BrotherGenericPCL {
         Write-Log "Brother Enhanced Generic PCL5e '$Name' is already registered."
         return $Name
     }
-    $Pin='42938c34b4b6d27f5e7bf5db061045a4058cc6dd'
+    $Pin='a2e5f73c3c3e55d019840b654793e6c5e24cd6b2'
     $Hash='EAD10C503072EB3788AF96824E4BCA2331D2F2EDF13D68DDE487AF0480547298'
     $Url="https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/$Pin/scripts/Install-BrotherGenericPCL.ps1"
     [void](Test-Https -Url $Url)
