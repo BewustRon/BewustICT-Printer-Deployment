@@ -404,7 +404,7 @@ function Install-ApprovedDriver {
                 $CurlOutput = & $CurlExe '--fail' '--silent' '--show-error' '--location' '--proto' '=https' '--proto-redir' '=https' '--connect-timeout' '20' '--max-time' '300' '--retry' '2' '--retry-delay' '2' '--output' $DownloadTemp $Url 2>&1
                 $CurlExit = $LASTEXITCODE
                 if ($CurlExit -ne 0) {
-                    throw "Windows curl.exe download voor '$Brand' mislukt, exitcode=$CurlExit: $($CurlOutput -join ' ')"
+                    throw "Windows curl.exe download voor '$Brand' mislukt, exitcode=${CurlExit}: $($CurlOutput -join ' ')"
                 }
             } else {
                 Write-Log 'Windows curl.exe niet beschikbaar, fallback Invoke-WebRequest.'
