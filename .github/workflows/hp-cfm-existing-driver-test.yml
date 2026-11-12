@@ -1,0 +1,73 @@
+name: HP UPD offline CFM with already-installed universal driver
+on:
+  push:
+    branches:
+      - fix/hp-upd-offline-color-duplex-tray3-20261112
+    paths:
+      - .github/workflows/hp-cfm-existing-driver-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  newqueue:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install existing HP UPD then create second queue with official CFM profile for Tray3
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+          $env:actie='Installeren'
+          $env:printerNaam='HP CI Existing Mono Tray2'
+          $env:printerIpAdres='192.0.2.50';$env:printerMerk='HP'
+          $env:kleurAfdrukken='Zwart-wit';$env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4';$env:papierlade='Cassette 2'
+          $env:instellenAlsStandaardprinter='false';$env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'BASELINE_HP_V12_FAILED'}
+          $old=Get-PrintConfiguration -PrinterName $env:printerNaam
+          Write-Host ('BASELINE_HP_MONO_COLOR='+$old.Color)
+          $root=Join-Path $env:RUNNER_TEMP 'oem'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          $zip=Join-Path $root 'hp.zip'
+          & "$env:WINDIR\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 --output $zip 'https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip'
+          if($LASTEXITCODE -ne 0){throw 'HP_CFM_ZIP_FAILED'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne 'EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2'){throw 'OEM_HASH_FAILED'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $ext=Join-Path $root 'ext'
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip,$ext)
+          $cfg=Join-Path $ext 'hpcpu360.cfg'
+          $config=[IO.File]::ReadAllText($cfg)
+          foreach($op in @(@{key='Tray3_install';old='NotInstalled';new='Installed'},@{key='DynamicRender';old='AUTODEVICE';new='COLORDEVICE'})){
+            $regex='(?s)(<feature\s+[^>]*>\s*'+$op.key+'\s*<current_option>)'+$op.old+'(</current_option>)'
+            if([regex]::Matches($config,$regex).Count -ne 1){throw ('HP_CONFIG_FEATURE_BAD_'+$op.key)}
+            $config=[regex]::Replace($config,$regex,'$1'+$op.new+'$2')
+          }
+          [xml]$parsed=$config
+          $cfm=Join-Path $ext 'hpcpu360.cfm'
+          [IO.File]::WriteAllText($cfm,$config,[Text.Encoding]::UTF8)
+          Write-Host ('HP_CFM_SHA256='+(Get-FileHash $cfm -Algorithm SHA256).Hash)
+          $spool=Join-Path $env:WINDIR 'System32\spool\drivers\x64\3'
+          if(-not (Test-Path $spool)){throw 'DRIVER3_FOLDER_NOT_FOUND'}
+          $target=Join-Path $spool 'hpcpu360.cfm'
+          Copy-Item -LiteralPath $cfm -Destination $target -Force -ErrorAction Stop
+          Write-Host ('COPIED_VENDOR_CFM_TO_DRIVER_SPOOL='+$target)
+          Import-Module PrintManagement -ErrorAction Stop
+          $name='HP CI New Color Tray3'
+          Add-Printer -Name $name -DriverName 'HP Universal Printing PCL 6' -PortName 'BIC_TCP_192.0.2.50_9100' -ErrorAction Stop
+          Add-Type -AssemblyName System.Drawing
+          $settings=New-Object System.Drawing.Printing.PrinterSettings
+          $settings.PrinterName=$name
+          Write-Host ('COLOR_QUEUE_SUPPORTS_COLOR='+$settings.SupportsColor)
+          foreach($s in @($settings.PaperSources)) {
+            if($s.SourceName -match '(?i)tray|lade|cassette'){Write-Host ('PAPER_SOURCE='+$s.SourceName+' RAW='+$s.RawKind)}
+          }
+          $tray3=@($settings.PaperSources|Where-Object {$_.SourceName -match '(?i)(?:tray|lade|cassette)\s*3(?:\s|$)'})
+          Write-Host ('TRAY3_COUNT='+$tray3.Count)
+          $oldAfter=Get-PrintConfiguration -PrinterName 'HP CI Existing Mono Tray2'
+          Write-Host ('OLD_QUEUE_MONO_AFTER_CFM='+$oldAfter.Color)
+          if($oldAfter.Color -ne $false){throw 'CFM_SPOOLED_OVERWROTE_EXISTING_QUEUE_MONO'}
+          if($tray3.Count -ne 1){throw 'HP_CFM_TRAY3_NOT_ACTIVE_IN_NEW_QUEUE'}
+          Write-Host 'HP_EXISTING_DRIVER_OFFLINE_CFM_QUEUE_OK'
