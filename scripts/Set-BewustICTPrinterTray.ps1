@@ -45,13 +45,47 @@ Add-Type -AssemblyName System.Drawing -ErrorAction Stop
 $settings = New-Object System.Drawing.Printing.PrinterSettings
 $settings.PrinterName = $PrinterNaam
 if (-not $settings.IsValid) { throw "PrinterSettings.IsValid is False voor '$PrinterNaam'." }
-$sources = @($settings.PaperSources)
-$matches = @($sources | Where-Object { [string]::Equals([string]$_.SourceName,$Papierlade,[StringComparison]::OrdinalIgnoreCase) })
-if ($matches.Count -ne 1) {
-    $available = ($sources | ForEach-Object { "$($_.SourceName) (RawKind=$($_.RawKind))" }) -join '; '
-    throw "PAPIERLADE_NIET_UNIEK_OF_ONBEKEND: '$Papierlade' komt $($matches.Count)x voor. Beschikbaar: $available"
+# NinjaOne requests a logical tray number. Vendor drivers report that same
+# physical tray under different localized names (HP: "Tray 2"/"Lade 2",
+# Epson: "Cassette 2"). Never guess a RawKind number or fall back to Auto.
+function Resolve-BICPaperSource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][object[]]$Sources,
+        [Parameter(Mandatory=$true)][string]$Requested
+    )
+    $Exact = @($Sources | Where-Object {
+        [string]::Equals(([string]$_.SourceName).Trim(),$Requested.Trim(),[StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($Exact.Count -eq 1) { return $Exact[0] }
+    if ($Exact.Count -gt 1) { throw "TRAY_AMBIGUOUS: exact '$Requested' occurs more than once in the driver." }
+
+    # Only explicit numbered tray aliases are equivalent. We deliberately do
+    # not map Windows DMBIN_UPPER/LOWER, 'Auto Select', 'Manual Feed', etc.
+    # to a physical tray number: their meaning is manufacturer-specific.
+    if ($Requested.Trim() -notmatch '^(?i:(?:cassette|tray|lade|papierlade|paper\s+tray))\s*(\d{1,2})$') {
+        throw "TRAY_REQUEST_NOT_SUPPORTED: use 'Cassette 1..4', 'Lade 1..4' or 'Tray 1..4'."
+    }
+    $Number = [int]$Matches[1]
+    if ($Number -lt 1 -or $Number -gt 4) { throw "TRAY_NUMBER_OUT_OF_RANGE: $Number" }
+    $AliasPattern = '^(?i:(?:cassette|tray|lade|papierlade|paper\s+tray))\s*(?:\#\s*)?0*' + $Number +
+        '(?:\s*\([^)]*\)|\s*[-:]\s*.+)?\s*$'
+    $Candidates = @($Sources | Where-Object {
+        ([string]$_.SourceName).Trim() -match $AliasPattern
+    })
+    if ($Candidates.Count -eq 1) { return $Candidates[0] }
+    $Available = @($Sources | ForEach-Object { "'$($_.SourceName)' (RawKind=$($_.RawKind))" }) -join '; '
+    if ($Candidates.Count -gt 1) {
+        throw "TRAY_AMBIGUOUS: '$Requested' matched $($Candidates.Count) driver sources. Available: $Available"
+    }
+    throw "TRAY_NOT_ADVERTISED_OFFLINE: $Requested niet beschikbaar via deze Windows-driver. Geen automatische fallback of onbewezen RawKind! Beschikbaar: $Available. HP UPD kan offline preconfiguratie (HP PARK/DCU) vereisen."
 }
-$target = $matches[0]
+$sources = @($settings.PaperSources)
+$target = Resolve-BICPaperSource -Sources $sources -Requested $Papierlade
+if (-not [string]::Equals(([string]$target.SourceName).Trim(),$Papierlade.Trim(),[StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host ("TRAY_VENDOR_ALIAS_RESOLVED: Requested='{0}' Actual='{1}' RawKind={2}" -f
+        $Papierlade,$target.SourceName,$target.RawKind)
+}
 if ($target.RawKind -lt 1 -or $target.RawKind -gt 32767) {
     throw "Ongeldige dmDefaultSource: $($target.RawKind)"
 }
