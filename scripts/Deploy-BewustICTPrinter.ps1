@@ -44,7 +44,7 @@ param(
     [string]$InstellenAlsStandaardprinter = 'false'
 )
 $ErrorActionPreference = 'Stop'
-$Version = '1.0.0-PILOT'
+$Version = '1.1.0-PILOT'
 $Root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment'
 $LogDir = Join-Path $Root 'Logs'
 $PkgDir = Join-Path $Root 'DriverPackages'
@@ -349,7 +349,7 @@ function Install-BrotherGenericPCL {
 function Install-ApprovedDriver {
     param([string]$Brand,[string]$CatalogUrl)
     if ([string]::IsNullOrWhiteSpace($CatalogUrl)) {
-        throw "Voor merk '$Brand' is geen goedgekeurde drivercatalogus ingesteld. Vul 'driverCatalogusUrl' in of geef de exacte naam van een reeds geinstalleerde driver op via 'driverNaam'."
+        throw "Voor merk '$Brand' is geen goedgekeurde drivercatalogus ingesteld."
     }
     [void](Test-Https -Url $CatalogUrl)
     Write-Log "Haal drivercatalogus op via HTTPS: $CatalogUrl"
@@ -365,31 +365,34 @@ function Install-ApprovedDriver {
     $Url = [string]$Cfg.downloadUrl
     $Hash = [string]$Cfg.sha256
     $PublisherSubstring = [string]$Cfg.signerSubjectContains
+    $PublisherThumbprint = [string]$Cfg.signerThumbprint
     $InfRelative = [string]$Cfg.infRelativePath
     $CatRelative = [string]$Cfg.catRelativePath
-    if ([string]::IsNullOrWhiteSpace($Name) -or $Hash -notmatch '^[a-fA-F0-9]{64}$' -or
-        -not $InfRelative -or -not $CatRelative -or -not $PublisherSubstring -or $Url -notmatch '\.zip($|\?)') {
-        throw "Onvolledig goedgekeurd driverrecord voor '$Brand'."
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Hash -notmatch '^[A-Fa-f0-9]{64}$' -or
+        $PublisherThumbprint -notmatch '^[A-Fa-f0-9]{40}$' -or
+        -not $InfRelative -or -not $CatRelative -or -not $PublisherSubstring -or
+        $Url -notmatch '\.zip($|\?)') {
+        throw "Onvolledig goedgekeurd driverrecord voor '$Brand' (inclusief gepinde uitgevercertificaat-fingerprint)."
     }
     [void](Test-Https -Url $Url)
-    if (Get-PrinterDriver -Name $Name -ErrorAction SilentlyContinue) {
-        Write-Log "Driver '$Name' is al lokaal geinstalleerd."
+    $ExistingDriver = Get-PrinterDriver -Name $Name -ErrorAction SilentlyContinue
+    if ($ExistingDriver) {
+        Write-Log "Driver '$Name' is al lokaal geinstalleerd; hergebruik zonder nieuwe cert trust."
         return $Name
     }
     $Dir = Join-Path $PkgDir $Hash.ToLowerInvariant()
     New-Item -ItemType Directory -Path $Dir -Force | Out-Null
     $ZipFile = Join-Path $Dir 'driver.zip'
     if (-not (Test-Path -LiteralPath $ZipFile)) {
-        Write-Log "Download goedgekeurde driver voor '$Brand'."
+        Write-Log "Download goedgekeurde driver voor '$Brand' vanaf officiele fabrikant."
         Invoke-WebRequest -Uri $Url -UseBasicParsing -OutFile $ZipFile -TimeoutSec 300 -ErrorAction Stop
     }
-    $ActualHash = (Get-FileHash -LiteralPath $ZipFile -Algorithm SHA256).Hash
+    $ActualHash = (Get-FileHash -LiteralPath $ZipFile -Algorithm SHA256 -ErrorAction Stop).Hash
     if ($ActualHash -ne $Hash) {
         Remove-Item -LiteralPath $ZipFile -Force -ErrorAction SilentlyContinue
         throw "SHA256-verificatie mislukt voor '$Brand'!"
     }
     $Extracted = Join-Path $Dir 'Expanded'
-    # Verify archive names and uncompressed size before extracting (path traversal / zip bombs).
     Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
     $Archive = [IO.Compression.ZipFile]::OpenRead($ZipFile)
@@ -409,23 +412,94 @@ function Install-ApprovedDriver {
     }
     $InfPath = Get-SafeChildPath -Base $Extracted -Relative $InfRelative
     $CatPath = Get-SafeChildPath -Base $Extracted -Relative $CatRelative
-    if (-not (Test-Path -LiteralPath $InfPath) -or -not (Test-Path -LiteralPath $CatPath)) {
+    if (-not (Test-Path -LiteralPath $InfPath -PathType Leaf) -or -not (Test-Path -LiteralPath $CatPath -PathType Leaf)) {
         throw "Het uitgepakte driverpakket mist INF/CAT voor '$Brand'."
     }
     $Signature = Get-AuthenticodeSignature -LiteralPath $CatPath -ErrorAction Stop
-    if ($Signature.Status -ne 'Valid') { throw "Ongeldige digitale handtekening op '$CatPath': $($Signature.Status)." }
-    if ([string]$Signature.SignerCertificate.Subject -notlike ('*' + $PublisherSubstring + '*')) {
-        throw "Onverwachte driveruitgever voor '$Brand': $($Signature.SignerCertificate.Subject)."
+    if ($Signature.Status -ne 'Valid') {
+        throw "Ongeldige digitale handtekening op '$CatPath': $($Signature.Status)."
     }
-    Write-Log "CAT-signatuur geldig, uitgever: $($Signature.SignerCertificate.Subject)"
-    $PnpUtil = Join-Path $env:WINDIR 'System32\pnputil.exe'
-    $PnpOutput = & $PnpUtil '/add-driver' $InfPath 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "PnPUtil mislukt (exit=$LASTEXITCODE): $($PnpOutput -join ' ')" }
-    Add-PrinterDriver -Name $Name -ErrorAction Stop
-    if (-not (Get-PrinterDriver -Name $Name -ErrorAction SilentlyContinue)) {
-        throw "De verwachte Windows-driver '$Name' is niet aanwezig na installatie. Controleer de INF-ModelName."
+    $Signer = $Signature.SignerCertificate
+    if (-not $Signer -or $Signer.Subject -notlike ('*' + $PublisherSubstring + '*') -or
+        $Signer.Thumbprint -ne $PublisherThumbprint) {
+        throw "Afwijkend fabrikantscertificaat voor '$Brand'. Verwachte thumbprint: $PublisherThumbprint."
     }
-    Write-Log "Goedgekeurde driver '$Name' toegevoegd aan Windows."
+    if ($Signer.NotAfter -le (Get-Date)) {
+        throw "Ondertekeningscertificaat van '$Brand' is verlopen ($($Signer.NotAfter)). Catalogue update vereist."
+    }
+    Write-Log "CAT ondertekening geldig: $($Signer.Subject); SHA1-certificaat-thumbprint=$($Signer.Thumbprint)"
+    if ($Signer.NotAfter -lt (Get-Date).AddDays(45)) {
+        Write-Log "WAARSCHUWING: uitgevercertificaat '$Brand' vervalt binnen 45 dagen: $($Signer.NotAfter)."
+    }
+
+    # Modern OEM printer drivers are Authenticode signed but no longer necessarily
+    # Microsoft WHQL signed. Windows SetupAPI otherwise opens an interactive
+    # unknown-publisher dialog. Trust ONLY the exact pinned leaf certificate.
+    # NEVER modify the Root or CA stores and NEVER lower driver security policies.
+    $NewPublisherTrust = $false
+    $TrustedPublisherStore = New-Object Security.Cryptography.X509Certificates.X509Store('TrustedPublisher','LocalMachine')
+    $TrustedPublisherStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    try {
+        $Present = $TrustedPublisherStore.Certificates.Find(
+            [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+            $PublisherThumbprint, $false)
+        if ($Present.Count -eq 0) {
+            $TrustedPublisherStore.Add($Signer)
+            $NewPublisherTrust = $true
+            Write-Log "Exact gecontroleerde OEM-signer '$Brand' toegevoegd aan LocalMachine\\TrustedPublisher. Niet aan Root."
+        } else {
+            Write-Log "OEM-signer '$Brand' is al aanwezig in LocalMachine\\TrustedPublisher."
+        }
+    } finally {
+        $TrustedPublisherStore.Close()
+    }
+    try {
+        $PnpUtil = Join-Path $env:WINDIR 'System32\pnputil.exe'
+        $StdOut = Join-Path $Dir 'pnputil.stdout.log'
+        $StdErr = Join-Path $Dir 'pnputil.stderr.log'
+        $PnpProcess = Start-Process -FilePath $PnpUtil -ArgumentList ('/add-driver "' + $InfPath + '"') -PassThru -RedirectStandardOutput $StdOut -RedirectStandardError $StdErr -WindowStyle Hidden -ErrorAction Stop
+        if (-not $PnpProcess.WaitForExit(180000)) {
+            try { Stop-Process -Id $PnpProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
+            throw "PnPUtil-timeout voor '$Brand' na 180 seconden; Windows-driverstage mogelijk geblokkeerd."
+        }
+        $PnpProcess.Refresh()
+        foreach ($Line in @(Get-Content -LiteralPath $StdOut -ErrorAction SilentlyContinue)) {
+            Write-Log ('PNPUTIL: ' + [string]$Line)
+        }
+        foreach ($Line in @(Get-Content -LiteralPath $StdErr -ErrorAction SilentlyContinue)) {
+            Write-Log ('PNPUTIL/ERROR: ' + [string]$Line)
+        }
+        # Some Windows PowerShell/Start-Process combinations do not surface
+        # an ExitCode. The final driver registration is always verified.
+        if ([string]$PnpProcess.ExitCode -match '^-?\d+$' -and [int]$PnpProcess.ExitCode -ne 0) {
+            throw "PnPUtil mislukte voor '$Brand' met exitcode $($PnpProcess.ExitCode)."
+        }
+        Add-PrinterDriver -Name $Name -ErrorAction Stop
+        $Registered = Get-PrinterDriver -Name $Name -ErrorAction Stop
+        if (-not $Registered -or $Registered.Name -ne $Name) {
+            throw "Windows-driver '$Name' is niet aanwezig na installatie."
+        }
+        Write-Log "Goedgekeurde universele fabrikantdriver '$Name' toegevoegd aan Windows."
+    } catch {
+        # Revert trust only when we added it and the actual driver was not installed.
+        # Do not remove certificates already trusted before this deployment.
+        if ($NewPublisherTrust -and -not (Get-PrinterDriver -Name $Name -ErrorAction SilentlyContinue)) {
+            try {
+                $Rollback = New-Object Security.Cryptography.X509Certificates.X509Store('TrustedPublisher','LocalMachine')
+                $Rollback.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                try {
+                    $Imported = $Rollback.Certificates.Find(
+                        [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                        $PublisherThumbprint, $false)
+                    foreach($CertToRemove in @($Imported)) { $Rollback.Remove($CertToRemove) }
+                } finally { $Rollback.Close() }
+                Write-Log "TrustedPublisher-import voor '$Brand' teruggedraaid na mislukte driverinstallatie."
+            } catch {
+                Write-Log "WAARSCHUWING: rollback TrustedPublisher $Brand is mislukt: $($_.Exception.Message)"
+            }
+        }
+        throw
+    }
     return $Name
 }
 # Ladekeuze via een generieke, op de Windows-spooler gevalideerde DEVMODE helper.
