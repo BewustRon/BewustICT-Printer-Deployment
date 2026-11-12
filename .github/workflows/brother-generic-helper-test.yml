@@ -27,6 +27,12 @@ jobs:
           if($err.Count){$err | ForEach-Object { Write-Host $_ };throw 'PowerShell parser failed'}
           Write-Host ("HELPER_SHA256=" + (Get-FileHash $path -Algorithm SHA256).Hash)
           Write-Host ('CENTRAL_SCRIPT_SHA256=' + (Get-FileHash .\scripts\Deploy-BewustICTPrinter.ps1 -Algorithm SHA256).Hash)
+          $rawHelper=Join-Path $env:TEMP 'BIC-RAW-HELPER.ps1'
+          $rawCentral=Join-Path $env:TEMP 'BIC-RAW-CENTRAL.ps1'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/a2e5f73c3c3e55d019840b654793e6c5e24cd6b2/scripts/Install-BrotherGenericPCL.ps1' -UseBasicParsing -OutFile $rawHelper
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/58a39dfe1985f010add74be242747e034128538b/scripts/Deploy-BewustICTPrinter.ps1' -UseBasicParsing -OutFile $rawCentral
+          Write-Host ('RAW_HELPER_SHA256=' + (Get-FileHash $rawHelper -Algorithm SHA256).Hash)
+          Write-Host ('RAW_CENTRAL_SHA256=' + (Get-FileHash $rawCentral -Algorithm SHA256).Hash)
           Write-Host 'HELPER_PARSER_OK'
       - name: Install manufacturer-signed Brother PCL5e and offline queue
         shell: powershell
