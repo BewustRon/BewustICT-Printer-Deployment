@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "note": "PILOT ONLY: Kyocera Generic color KX tested with vendor TrustedPublisher in isolated Windows CI 2026-11-12. HP remains pending until verified. Full zero-touch requires signed publisher certificate pinned by exact thumbprint; no trust in root CA.",
+  "note": "HP UPD PCL6 and Kyocera KX Generic color drivers are PILOT approved for auto deployment only. Both OEM packages and exact publisher leaf certificates pinned and driver registration verified on isolated Windows CI 2026-11-12. Requires LocalMachine TrustedPublisher leaf trust (not Root). Physical output and printer language compatibility not yet verified.",
   "drivers": {
     "HP": {
-      "status": "pending",
+      "status": "approved",
       "description": "HP Universal Print Driver PCL6 x64, official HP ZIP (Windows 11)",
       "sourcePage": "https://support.hp.com/us-en/drivers/hp-universal-print-series-for-windows/model/3271558",
-      "driverName": "",
+      "driverName": "HP Universal Printing PCL 6",
       "downloadUrl": "https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip",
       "sha256": "EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2",
       "infRelativePath": "hpcu360u.inf",
@@ -15,10 +15,10 @@
       "signerSubjectContains": "HP Inc.",
       "versionCandidate": "PCL 6 - actuele x64 build te bevestigen",
       "manufacturerPackage": "upd-pcl6-win11-x64-8.2.0.26819.zip",
-      "distributionAssessment": "official-vendor-direct-download-no-redistribution",
-      "approvalNotes": "Official HP ZIP and INF/CAT verified Windows CI 2026-11-12. Windows driver registration, exact driverName, printer model support and physical print test required before approval.",
+      "distributionAssessment": "approved-for-deployment",
+      "approvalNotes": "Official HP PCL6 v8.2.0 x64 catalog, exact signer thumbprint, pnputil staging, Add-PrinterDriver and offline TCP queue verified in Windows GitHub Actions run 43238250311 (physical print not yet tested).",
       "sourceCheckedAt": "2026-11-12",
-      "signerThumbprint": ""
+      "signerThumbprint": "BE845AAF486FD9F15D2C71BEED66E8AE21429EEA"
     },
     "Epson": {
       "status": "pending",
