@@ -20,6 +20,8 @@ jobs:
         include:
           - brand: Kyocera
             expected_driver: Kyocera Generic color KX
+          - brand: HP
+            expected_driver: HP Universal Printing PCL 6
     steps:
       - uses: actions/checkout@v4
       - name: Install signed universal driver and offline TCP printer queue
