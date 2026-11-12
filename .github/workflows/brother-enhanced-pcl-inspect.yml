@@ -1,0 +1,40 @@
+name: Brother Enhanced Generic PCL official binary inspection
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/brother-enhanced-pcl-inspect.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - name: Resolve official Brother download and inspect package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          $url='https://support.brother.com/g/b/downloadend.aspx?c=nl&lang=nl&prod=dcpl5500dn_us_eu&os=10086&dlid=dlf103331_000&flang=22&type3=428'
+          Write-Host ('SOURCE='+$url)
+          $response=Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 45
+          $html=[string]$response.Content
+          Write-Host ('STATUS='+$response.StatusCode+' HTML_BYTES='+$html.Length)
+          foreach($term in @('genp5e','download.brother.com','downloadUrl','downloadend','dlf103331','eula','button','accept')) {
+            $idx=$html.IndexOf($term,[StringComparison]::OrdinalIgnoreCase)
+            Write-Host ('TERM='+$term+' OFFSET='+$idx)
+            if($idx -ge 0) {
+              $offset=[Math]::Max(0,$idx-500)
+              Write-Host ('EXCERPT='+$html.Substring($offset,[Math]::Min(1600,$html.Length-$offset)))
+            }
+          }
+          $absolute = [regex]::Matches($html,'https?://[^\s"''<>]+', [Text.RegularExpressions.RegexOptions]::IgnoreCase) |
+            ForEach-Object { [Net.WebUtility]::HtmlDecode($_.Value) } |
+            Where-Object { $_ -match 'brother|genp5e' } | Select-Object -Unique
+          $absolute | Select-Object -First 55 | ForEach-Object { Write-Host ('URL='+$_) }
+          $relative=[regex]::Matches($html, '(?:href|action)\s*=\s*["''][^"'']+["'']') | Select-Object -First 80
+          $relative | ForEach-Object { Write-Host ('LINK='+$_.Value) }
+          Write-Host 'BROTHER_DOWNLOAD_PAGE_DONE'
