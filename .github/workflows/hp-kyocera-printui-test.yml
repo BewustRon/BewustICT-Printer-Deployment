@@ -1,0 +1,70 @@
+name: HP Kyocera PrintUI unattended installation test
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/hp-kyocera-printui-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  printui:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: HP
+            url: https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip
+            sha: EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2
+            inf: hpcu360u.inf
+            model: HP Universal Printing PCL 6
+          - brand: Kyocera
+            url: https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip
+            sha: 8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E
+            inf: Kx87_UPD_8.7A.0422_en_RC1_signed/64bit/OEMSETUP.INF
+            model: Kyocera Generic color KX
+    steps:
+      - name: Install from official signed INF with PrintUI
+        shell: powershell
+        env:
+          OEM_URL: ${{ matrix.url }}
+          OEM_SHA: ${{ matrix.sha }}
+          OEM_INF: ${{ matrix.inf }}
+          OEM_MODEL: ${{ matrix.model }}
+          OEM_BRAND: ${{ matrix.brand }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          Import-Module PrintManagement -ErrorAction Stop
+          $folder=Join-Path $env:RUNNER_TEMP ('PrinterPrintUI-'+$env:OEM_BRAND)
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          $zip=Join-Path $folder 'official-driver.zip'
+          Invoke-WebRequest -Uri $env:OEM_URL -OutFile $zip -UseBasicParsing -TimeoutSec 240
+          $actual=(Get-FileHash $zip -Algorithm SHA256).Hash
+          if($actual -ne $env:OEM_SHA){throw "OEM_SHA_MISMATCH=$actual"}
+          $expanded=Join-Path $folder 'expanded'
+          Expand-Archive -LiteralPath $zip -DestinationPath $expanded -Force
+          $inf=Join-Path $expanded $env:OEM_INF
+          if(-not (Test-Path -LiteralPath $inf)){throw "INF_MISSING=$inf"}
+          Write-Host "OEM_INSTALL_START BRAND=$env:OEM_BRAND MODEL=$env:OEM_MODEL"
+          $native=Join-Path $env:WINDIR 'System32\rundll32.exe'
+          $args='printui.dll,PrintUIEntry /ia /q /m "{0}" /h x64 /v 3 /f "{1}"' -f $env:OEM_MODEL,$inf
+          Write-Host "RUN: rundll32.exe $args"
+          $p=Start-Process -FilePath $native -ArgumentList $args -PassThru -NoNewWindow
+          if(-not $p.WaitForExit(135000)){
+             $p.Kill()
+             throw 'PRINTUI_INSTALL_TIMEOUT_135_SEC'
+          }
+          Write-Host "PRINTUI_EXIT=$($p.ExitCode)"
+          $driver=Get-PrinterDriver -Name $env:OEM_MODEL -ErrorAction SilentlyContinue
+          if(-not $driver){throw "PRINTUI_DRIVER_NOT_INSTALLED: $env:OEM_MODEL"}
+          Write-Host "DRIVER_OK: NAME=$($driver.Name); MANUFACTURER=$($driver.Manufacturer); VERSION=$($driver.DriverVersion)"
+          $port='BIC_CI_PRINTUI_192.0.2.50_9100'
+          Add-PrinterPort -Name $port -PrinterHostAddress '192.0.2.50' -PortNumber 9100 -ErrorAction Stop
+          Add-Printer -Name ('BIC CI PrintUI '+$env:OEM_BRAND) -DriverName $env:OEM_MODEL -PortName $port -ErrorAction Stop
+          $queue=Get-Printer -Name ('BIC CI PrintUI '+$env:OEM_BRAND) -ErrorAction Stop
+          if($queue.DriverName -ne $env:OEM_MODEL){throw 'WRONG_PRINT_QUEUE_DRIVER'}
+          Write-Host 'OEM_PRINTUI_OFFLINE_QUEUE_OK'
