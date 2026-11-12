@@ -1,0 +1,44 @@
+name: NinjaOne v1.2 HP offline tray mandatory integration
+on:
+  push:
+    branches:
+      - fix/printer-tray-driver-alias-offline-20261112
+    paths:
+      - scripts/NinjaOne-Printer-Bootstrap-v1.2.0-PILOT.ps1
+      - .github/workflows/printer-v12-launcher-tray.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  launcher:
+    runs-on: windows-2025
+    timeout-minutes: 13
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean Windows offline forced paper tray via exact NinjaOne v1.2 bootstrap
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI NinjaOne Offline HP Tray2'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Zwart-wit'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Cassette 2'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0) {throw 'NINJAONE_V12_TRAY_INSTALL_FAILED'}
+          Import-Module PrintManagement -ErrorAction Stop
+          $p=Get-Printer -Name $env:printerNaam -ErrorAction Stop
+          if($p.DriverName -ne 'HP Universal Printing PCL 6'){throw 'WRONG_PRINTER_DRIVER'}
+          Add-Type -AssemblyName System.Drawing
+          $settings=New-Object System.Drawing.Printing.PrinterSettings
+          $settings.PrinterName=$env:printerNaam
+          $s=$settings.DefaultPageSettings.PaperSource
+          Write-Host ('DRIVER_DEFAULT_SOURCE='+$s.SourceName+' RAWKIND='+$s.RawKind)
+          if(($s.SourceName).Trim() -ne 'Tray 2'){throw 'TRAY_NOT_SELECTED_IN_DRIVER_DEFAULTS'}
+          Write-Host 'NINJAONE_V12_OFFLINE_HP_TRAY2_OK'
