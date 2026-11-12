@@ -1,0 +1,57 @@
+name: HP Kyocera zero-touch central deployment pilot
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-zero-touch-publisher-trust-20261112
+    paths:
+      - scripts/Deploy-BewustICTPrinter.ps1
+      - catalog/drivers.json
+      - .github/workflows/hp-kyocera-central-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  vendor-queue:
+    runs-on: windows-2025
+    timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: Kyocera
+            expected_driver: Kyocera Generic color KX
+          - brand: HP
+            expected_driver: HP Universal Printing PCL 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install signed universal driver and offline TCP printer queue
+        shell: powershell
+        env:
+          VENDOR: ${{ matrix.brand }}
+          EXPECTED_DRIVER: ${{ matrix.expected_driver }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $catalog = 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/' + $env:GITHUB_SHA + '/catalog/drivers.json'
+          $name='BIC CI '+$env:VENDOR+' Universal Color'
+          $args = @(
+              '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
+              '-File','.\scripts\Deploy-BewustICTPrinter.ps1',
+              '-Actie','Installeren','-PrinterNaam',$name,
+              '-PrinterIpAdres','192.0.2.50','-PrinterMerk',$env:VENDOR,
+              '-DriverCatalogusUrl',$catalog,
+              '-KleurAfdrukken','Kleur','-DubbelzijdigAfdrukken','Uit',
+              '-Papierformaat','A4','-Papierlade','Automatisch'
+          )
+          & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" @args
+          if($LASTEXITCODE -ne 0){throw "UNIVERSAL_QUEUE_SCRIPT_FAILED=$LASTEXITCODE"}
+          $queue=Get-Printer -Name $name -ErrorAction Stop
+          if($queue.DriverName -ne $env:EXPECTED_DRIVER){throw "DRIVER_MISMATCH=$($queue.DriverName)"}
+          $port=Get-PrinterPort -Name $queue.PortName -ErrorAction Stop
+          if($port.PrinterHostAddress -ne '192.0.2.50'){throw "PORT_IP_MISMATCH"}
+          $config=Get-PrintConfiguration -PrinterName $name -ErrorAction Stop
+          Write-Host "VERIFIED_QUEUE_NAME=$($queue.Name)"
+          Write-Host "VERIFIED_DRIVER=$($queue.DriverName)"
+          Write-Host "VERIFIED_PORT=$($port.Name)"
+          Write-Host "VERIFIED_COLOR=$($config.Color)"
+          Write-Host "VERIFIED_PAPERSIZE=$($config.PaperSize)"
+          Write-Host 'OEM_UNIVERSAL_FULL_INSTALL_OK'

@@ -1,0 +1,53 @@
+name: NinjaOne v1.1 - OEM zero-touch full launcher test
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-zero-touch-publisher-trust-20261112
+    paths:
+      - .github/workflows/oem-ninjaone-launcher-test.yml
+      - scripts/NinjaOne-Printer-Bootstrap-v1.1.0-PILOT.ps1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  launcher:
+    runs-on: windows-2025
+    timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: HP
+            driver: HP Universal Printing PCL 6
+          - brand: Kyocera
+            driver: Kyocera Generic color KX
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cold install vendor driver via exact NinjaOne v1.1 bootstrap
+        shell: powershell
+        env:
+          BRAND: ${{ matrix.brand }}
+          EXPECTED: ${{ matrix.driver }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI NinjaOne v1.1 '+$env:BRAND
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk=$env:BRAND
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $env:driverCatalogusUrl='https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/'+$env:GITHUB_SHA+'/catalog/drivers.json'
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.1.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'NINJAONE_OEM_BOOTSTRAP_FAILED'}
+          $queue=Get-Printer -Name $env:printerNaam -ErrorAction Stop
+          if($queue.DriverName -ne $env:EXPECTED){throw "NINJAONE_DRIVER_MISMATCH=$($queue.DriverName)"}
+          $port=Get-PrinterPort -Name $queue.PortName -ErrorAction Stop
+          if($port.PrinterHostAddress -ne '192.0.2.50'){throw 'NINJAONE_OEM_PORT_MISMATCH'}
+          $config=Get-PrintConfiguration -PrinterName $env:printerNaam -ErrorAction Stop
+          if(-not $config.Color -or $config.PaperSize -ne 'A4'){throw 'NINJAONE_OEM_COLOR_A4_MISMATCH'}
+          Write-Host ('NINJAONE_V11_OEM_ZERO_TOUCH_OK='+$env:BRAND)
