@@ -1,0 +1,60 @@
+name: Brother Generic PCL - scripted zero-touch Windows test
+on:
+  push:
+    branches:
+      - fix/brother-pcl5e-no-discovery-20261112
+    paths:
+      - scripts/Install-BrotherGenericPCL.ps1
+      - scripts/Deploy-BewustICTPrinter.ps1
+      - .github/workflows/brother-generic-helper-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and record immutable SHA256 of helper
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Resolve-Path .\scripts\Install-BrotherGenericPCL.ps1
+          $tok=$null;$err=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tok,[ref]$err)
+          if($err.Count){$err | ForEach-Object { Write-Host $_ };throw 'PowerShell parser failed'}
+          Write-Host ("HELPER_SHA256=" + (Get-FileHash $path -Algorithm SHA256).Hash)
+          Write-Host 'HELPER_PARSER_OK'
+      - name: Install manufacturer-signed Brother PCL5e and offline queue
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $output= & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\Install-BrotherGenericPCL.ps1 2>&1
+          $code=$LASTEXITCODE
+          foreach($line in @($output)) {Write-Host ([string]$line)}
+          if($code -ne 0){throw "BROTHER_GENERIC_HELPER_EXIT=$code"}
+          if(-not (@($output|ForEach-Object {[string]$_}) -match '^BROTHER_GENERIC_DRIVER_OK$')){
+            throw 'Missing Brother driver verified marker'
+          }
+          Import-Module PrintManagement
+          $driver=Get-PrinterDriver -Name 'Brother PCL5e Driver' -ErrorAction Stop
+          $portName='BIC_CI_BROTHER_GENERIC_192.0.2.50'
+          Add-PrinterPort -Name $portName -PrinterHostAddress '192.0.2.50' -PortNumber 9100
+          Add-Printer -Name 'BIC CI - Brother PCL5e' -DriverName $driver.Name -PortName $portName
+          $p=Get-Printer -Name 'BIC CI - Brother PCL5e' -ErrorAction Stop
+          if($p.DriverName -ne $driver.Name -or $p.PortName -ne $portName) {
+            throw 'BROTHER_GENERIC_QUEUE_FAILED'
+          }
+          Write-Host 'BROTHER_GENERIC_OFFLINE_QUEUE_OK'
+
+      - name: Verify central printerdeploy uses Brother PCL5e instead of discovery
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cmd = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+          & $cmd -NoProfile -NonInteractive -File .\scripts\Deploy-BewustICTPrinter.ps1 -Actie Installeren -PrinterNaam 'BIC CI Brother Full Deployment' -PrinterIpAdres '192.0.2.50' -PrinterMerk Brother -KleurAfdrukken 'Zwart-wit' -DubbelzijdigAfdrukken Uit -Papierformaat A4 -Papierlade Automatisch
+          if ($LASTEXITCODE -ne 0) { throw 'Central Brother deployment failed' }
+          $p = Get-Printer -Name 'BIC CI Brother Full Deployment' -ErrorAction Stop
+          if ($p.DriverName -ne 'Brother PCL5e Driver') { throw 'Central deployment installed incorrect Brother driver' }
+          Write-Host 'BROTHER_V1_CENTRAL_DEPLOYMENT_OK'
