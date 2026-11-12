@@ -1,0 +1,30 @@
+name: Printer v1.2 raw central SHA256 pin
+on:
+  push:
+    branches:
+      - fix/printer-tray-driver-alias-offline-20261112
+    paths:
+      - .github/workflows/printer-v12-raw-sha.yml
+      - scripts/Deploy-BewustICTPrinter.ps1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pin:
+    runs-on: windows-2025
+    timeout-minutes: 3
+    steps:
+      - name: Get raw commit SHA and parser-check immutable central script
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $sha='cf351260f354deae96ae02d4abc0b087543255cb'
+          $uri='https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/'+$sha+'/scripts/Deploy-BewustICTPrinter.ps1'
+          $file=Join-Path $env:RUNNER_TEMP 'deploy-raw.ps1'
+          Invoke-WebRequest -Uri $uri -OutFile $file -UseBasicParsing -TimeoutSec 45
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'PARSER_FAILED'}
+          Write-Host ('CENTRAL_PINNED_COMMIT='+$sha)
+          Write-Host ('CENTRAL_PINNED_RAW_SHA256='+(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash)
+          Write-Host 'CENTRAL_PIN_VALIDATED'
