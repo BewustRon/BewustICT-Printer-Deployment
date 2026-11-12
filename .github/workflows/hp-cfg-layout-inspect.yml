@@ -1,0 +1,56 @@
+name: HP PCL6 configuration format and DCU profiles inspection
+on:
+  push:
+    branches:
+      - fix/hp-upd-offline-color-duplex-tray3-20261112
+    paths:
+      - .github/workflows/hp-cfg-layout-inspect.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Inspect official HP UPD ZIP CFG and HP PARK DCU paths without executing programs
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $sources=@(
+            @{key='UPD';url='https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip'},
+            @{key='PARK';url='https://ftp.hp.com/pub/softlib/software13/printers/UPD/HP-PARK-v1.9.2.zip'}
+          )
+          foreach($src in $sources){
+            $zip=Join-Path $env:RUNNER_TEMP ($src.key+'.zip')
+            & "$env:WINDIR\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 90 --output $zip $src.url
+            if($LASTEXITCODE -ne 0){throw "DOWNLOAD_FAILED_$($src.key)"}
+            Write-Host ("SOURCE="+$src.key+" SHA256="+(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash)
+            $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+            try{
+              $matches=@($archive.Entries | Where-Object {
+                if($src.key -eq 'UPD'){
+                  $_.FullName -match '(?i)\.(cfg|cfm|cf_|inf)$'
+                }else{
+                  $_.FullName -match '(?i)(driver configuration utility|hpbcfg|\.cfm$)'
+                }
+              })
+              foreach($entry in $matches | Select-Object -First 90){
+                Write-Host ("ENTRY="+$src.key+"/"+$entry.FullName+" BYTES="+$entry.Length)
+                if($src.key -eq 'UPD' -and $entry.FullName -match '(?i)\.(cfg|cfm|cf_)$' -and $entry.Length -lt 300000){
+                  $s=$entry.Open()
+                  try {
+                    $buf=New-Object byte[] ([Math]::Min(80,[int]$entry.Length))
+                    $n=$s.Read($buf,0,$buf.Length)
+                    Write-Host ("CFG_HEADER_ASCII="+[Text.Encoding]::ASCII.GetString($buf,0,$n))
+                    Write-Host ("CFG_HEADER_HEX="+[BitConverter]::ToString($buf,0,$n))
+                  }finally{$s.Dispose()}
+                }
+              }
+              Write-Host ("MATCH_COUNT="+$src.key+"/"+$matches.Count)
+            }finally{$archive.Dispose()}
+          }
+          Write-Host 'HP_OFFLINE_VENDOR_CONFIG_INSPECT_DONE'
