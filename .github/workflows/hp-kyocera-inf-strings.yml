@@ -1,0 +1,62 @@
+name: HP Kyocera exact universal driver names
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/hp-kyocera-inf-strings.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  names:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: HP
+            url: https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip
+            sha: EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2
+            inf: hpcu360u.inf
+          - brand: Kyocera
+            url: https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip
+            sha: 8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E
+            inf: Kx87_UPD_8.7A.0422_en_RC1_signed/64bit/OEMSETUP.INF
+    steps:
+      - name: Read manufacturer INF model strings, no driver install
+        shell: pwsh
+        env:
+          BRAND: ${{ matrix.brand }}
+          URL: ${{ matrix.url }}
+          SHA: ${{ matrix.sha }}
+          INF: ${{ matrix.inf }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $dir = Join-Path $env:RUNNER_TEMP $env:BRAND
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $zip = Join-Path $dir 'package.zip'
+          Invoke-WebRequest -Uri $env:URL -OutFile $zip -TimeoutSec 180 -ErrorAction Stop
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:SHA) { throw 'HASH_MISMATCH' }
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entry = $archive.Entries | Where-Object { $_.FullName.Replace('\','/').Equals($env:INF,[StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+            if(-not $entry){throw ("INF_NOT_FOUND " + $env:INF)}
+            $reader = New-Object IO.StreamReader($entry.Open(), [Text.Encoding]::Default, $true)
+            try {$lines = @($reader.ReadToEnd() -split "\r?\n")} finally {$reader.Dispose()}
+          } finally {$archive.Dispose()}
+          Write-Host ("BRAND=" + $env:BRAND)
+          Write-Host ("INF_LINE_COUNT=" + $lines.Count)
+          Write-Host '=== Printer model entries ==='
+          $lines | Where-Object { $_ -match 'Universal|KX DRIVER|KX Driver|PCL ?6|HP Universal|Kyocera' } | Select-Object -First 130 | ForEach-Object { Write-Host $_ }
+          Write-Host '=== Printer strings header ==='
+          $found=$false
+          foreach($line in $lines){
+            if($line -match '^\[Strings(?:\.0409)?\]'){$found=$true}
+            if($found){Write-Host $line; if(++$count -gt 50){break}}
+          }
+          Write-Host 'INF_MODEL_NAMES_COMPLETE'
