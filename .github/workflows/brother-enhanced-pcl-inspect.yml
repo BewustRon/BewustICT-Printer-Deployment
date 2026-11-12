@@ -37,4 +37,17 @@ jobs:
           $absolute | Select-Object -First 55 | ForEach-Object { Write-Host ('URL='+$_) }
           $relative=[regex]::Matches($html, '(?:href|action)\s*=\s*["''][^"'']+["'']') | Select-Object -First 80
           $relative | ForEach-Object { Write-Host ('LINK='+$_.Value) }
+          $howto='https://support.brother.com/g/b/downloadhowto.aspx?c=nl&lang=nl&prod=dcpl5500dn_us_eu&os=10086&dlid=dlf103331_000&flang=22&type3=428'
+          Write-Host ('HOWTO='+$howto)
+          try {
+            $h=Invoke-WebRequest -Uri $howto -UseBasicParsing -MaximumRedirection 8 -TimeoutSec 90 -ErrorAction Stop
+            Write-Host ('HOWTO_STATUS='+$h.StatusCode+' TYPE='+$h.Headers['Content-Type']+' BYTES='+$h.RawContentLength)
+            Write-Host ('HOWTO_FINAL_URL='+$h.BaseResponse.RequestMessage.RequestUri)
+            $str=[string]$h.Content
+            foreach($term in @('genp5e','download.brother.com','welcome/dlf','download','EXE')) {
+              $pos=$str.IndexOf($term,[StringComparison]::OrdinalIgnoreCase)
+              Write-Host ('HOWTO_TERM='+$term+' OFFSET='+$pos)
+              if($pos -ge 0) { $begin=[Math]::Max(0,$pos-500); Write-Host ('HOWTO_CONTEXT='+$str.Substring($begin,[Math]::Min(1500,$str.Length-$begin))) }
+            }
+          }catch{Write-Host ('HOWTO_ERROR='+$_.Exception.Message)}
           Write-Host 'BROTHER_DOWNLOAD_PAGE_DONE'
