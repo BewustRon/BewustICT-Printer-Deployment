@@ -383,9 +383,45 @@ function Install-ApprovedDriver {
     $Dir = Join-Path $PkgDir $Hash.ToLowerInvariant()
     New-Item -ItemType Directory -Path $Dir -Force | Out-Null
     $ZipFile = Join-Path $Dir 'driver.zip'
-    if (-not (Test-Path -LiteralPath $ZipFile)) {
+    # WinPS 5.1 Invoke-WebRequest is extremely slow for Kyocera's 251 MB ZIP on
+    # Windows runners. Native inbox curl.exe streams directly to disk and uses
+    # HTTPS-only redirects. A per-run temp file prevents truncated cache reuse.
+    if (Test-Path -LiteralPath $ZipFile -PathType Leaf) {
+        $CachedHash = (Get-FileHash -LiteralPath $ZipFile -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($CachedHash -ne $Hash) {
+            Write-Log "Drivercache SHA256 ongeldig voor '$Brand'; verwijder beschadigde cache."
+            Remove-Item -LiteralPath $ZipFile -Force -ErrorAction Stop
+        }
+    }
+    if (-not (Test-Path -LiteralPath $ZipFile -PathType Leaf)) {
         Write-Log "Download goedgekeurde driver voor '$Brand' vanaf officiele fabrikant."
-        Invoke-WebRequest -Uri $Url -UseBasicParsing -OutFile $ZipFile -TimeoutSec 300 -ErrorAction Stop
+        $DownloadTemp = Join-Path $Dir ('vendor-download-' + [guid]::NewGuid().ToString('N') + '.zip')
+        $DownloadStart = Get-Date
+        try {
+            $CurlExe = Join-Path $env:WINDIR 'System32\curl.exe'
+            if (Test-Path -LiteralPath $CurlExe -PathType Leaf) {
+                Write-Log 'Gebruik Windows curl.exe (HTTPS-only, streaming naar disk).'
+                $CurlOutput = & $CurlExe '--fail' '--silent' '--show-error' '--location' '--proto' '=https' '--proto-redir' '=https' '--connect-timeout' '20' '--max-time' '300' '--retry' '2' '--retry-delay' '2' '--output' $DownloadTemp $Url 2>&1
+                $CurlExit = $LASTEXITCODE
+                if ($CurlExit -ne 0) {
+                    throw "Windows curl.exe download voor '$Brand' mislukt, exitcode=$CurlExit: $($CurlOutput -join ' ')"
+                }
+            } else {
+                Write-Log 'Windows curl.exe niet beschikbaar, fallback Invoke-WebRequest.'
+                Invoke-WebRequest -Uri $Url -UseBasicParsing -OutFile $DownloadTemp -TimeoutSec 300 -ErrorAction Stop
+            }
+            $ReceivedHash = (Get-FileHash -LiteralPath $DownloadTemp -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($ReceivedHash -ne $Hash) {
+                throw "Fabrikantdriver download voor '$Brand' heeft onjuiste SHA256: $ReceivedHash."
+            }
+            Move-Item -LiteralPath $DownloadTemp -Destination $ZipFile -Force -ErrorAction Stop
+            $Seconds=[int]((Get-Date)-$DownloadStart).TotalSeconds
+            Write-Log "Download '$Brand' voltooid in $Seconds seconden, SHA256 geverifieerd."
+        } finally {
+            if (Test-Path -LiteralPath $DownloadTemp -PathType Leaf) {
+                Remove-Item -LiteralPath $DownloadTemp -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
     $ActualHash = (Get-FileHash -LiteralPath $ZipFile -Algorithm SHA256 -ErrorAction Stop).Hash
     if ($ActualHash -ne $Hash) {
