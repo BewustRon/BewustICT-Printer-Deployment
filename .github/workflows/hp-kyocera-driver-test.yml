@@ -1,0 +1,67 @@
+name: HP and Kyocera Windows driver registration pilot
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/hp-kyocera-driver-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  register-driver:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: HP
+            url: https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip
+            sha256: EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2
+            inf: hpcu360u.inf
+          - brand: Kyocera
+            url: https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip
+            sha256: 8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E
+            inf: Kx87_UPD_8.7A.0422_en_RC1_signed/64bit/OEMSETUP.INF
+    steps:
+      - name: Download pinned package and register INF in Windows
+        shell: pwsh
+        env:
+          BRAND: ${{ matrix.brand }}
+          URL: ${{ matrix.url }}
+          EXPECTED_SHA: ${{ matrix.sha256 }}
+          INF: ${{ matrix.inf }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          $base=Join-Path $env:RUNNER_TEMP $env:BRAND
+          New-Item -ItemType Directory -Force -Path $base | Out-Null
+          $zip=Join-Path $base 'vendor.zip'
+          Invoke-WebRequest -Uri $env:URL -OutFile $zip -TimeoutSec 900 -ErrorAction Stop
+          $hash=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          if($hash -ne $env:EXPECTED_SHA){ throw "VENDOR_HASH_MISMATCH: $hash" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $extract=Join-Path $base 'expanded'
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip,$extract)
+          $inf=Join-Path $extract $env:INF
+          if(-not (Test-Path -LiteralPath $inf)){ throw "INF_NOT_FOUND $inf" }
+          Write-Host '=== PnPUtil ==='
+          & pnputil.exe /add-driver "$inf"
+          if($LASTEXITCODE -ne 0){throw "PNPUTIL_FAILED $LASTEXITCODE"}
+          Write-Host '=== Driver candidate names in INF ==='
+          Select-String -LiteralPath $inf -Pattern 'Universal|KX|PCL|HP' | Select-Object -Last 30 | ForEach-Object { Write-Host $_.Line.Trim() }
+          Write-Host '=== Installed printer drivers before Add-PrinterDriver ==='
+          Get-PrinterDriver | Where-Object Name -match 'HP|Kyocera|KX' | Select-Object Name,Manufacturer | Format-Table -AutoSize
+          $candidates= if($env:BRAND -eq 'HP') { @('HP Universal Printing PCL 6','HP Universal Printing PCL 6 (v7.4.0)') } else { @('KX DRIVER','Kyocera KX Driver','Kyocera KX Universal Printer Driver') }
+          foreach($name in $candidates) {
+            try {
+              Add-PrinterDriver -Name $name -ErrorAction Stop
+              Write-Host ("ADD_DRIVER_OK=" + $name)
+            } catch {
+              Write-Host ("ADD_DRIVER_REJECTED=" + $name + " : " + $_.Exception.Message)
+            }
+          }
+          Write-Host '=== Installed printer drivers ==='
+          Get-PrinterDriver | Where-Object Name -match 'HP|Kyocera|KX' | Select-Object Name,Manufacturer,MajorVersion | Format-Table -AutoSize
+          Write-Host 'DRIVER_CANDIDATE_INSPECTION_DONE'
