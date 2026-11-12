@@ -1,0 +1,71 @@
+name: HP and Kyocera driver package inspection (pilot)
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/hp-kyocera-package-inspect.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: HP
+            package_url: https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip
+          - brand: Kyocera
+            package_url: https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip
+    steps:
+      - name: Download official vendor package and inspect INF/CAT
+        shell: pwsh
+        env:
+          BRAND: ${{ matrix.brand }}
+          PACKAGE_URL: ${{ matrix.package_url }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $folder = Join-Path $env:RUNNER_TEMP ("inspect-" + $env:BRAND)
+          New-Item -ItemType Directory -Force -Path $folder | Out-Null
+          $zip = Join-Path $folder 'vendor.zip'
+          Write-Host ("VENDOR=" + $env:BRAND)
+          Write-Host ("SOURCE=" + $env:PACKAGE_URL)
+          Invoke-WebRequest -Uri $env:PACKAGE_URL -OutFile $zip -TimeoutSec 900 -ErrorAction Stop
+          $file = Get-Item -LiteralPath $zip
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          Write-Host ("PACKAGE_BYTES=" + $file.Length)
+          Write-Host ("PACKAGE_SHA256=" + $hash)
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entries = @($archive.Entries)
+            $infs = @($entries | Where-Object { $_.FullName -match '(?i)\.inf$' })
+            $cats = @($entries | Where-Object { $_.FullName -match '(?i)\.cat$' })
+            Write-Host ("ZIP_ENTRIES=" + $entries.Count)
+            Write-Host ("INF_COUNT=" + $infs.Count + " CAT_COUNT=" + $cats.Count)
+            Write-Host '=== INF paths ==='
+            $infs | Select-Object -First 85 | ForEach-Object { Write-Host $_.FullName }
+            Write-Host '=== CAT paths ==='
+            $cats | Select-Object -First 85 | ForEach-Object { Write-Host $_.FullName }
+          }
+          finally { $archive.Dispose() }
+          $expanded = Join-Path $folder 'expanded'
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip, $expanded)
+          $realInfs = @(Get-ChildItem -LiteralPath $expanded -File -Recurse -Filter '*.inf' | Select-Object -First 30)
+          $realCats = @(Get-ChildItem -LiteralPath $expanded -File -Recurse -Filter '*.cat' | Select-Object -First 30)
+          Write-Host '=== INF metadata ==='
+          foreach($inf in $realInfs) {
+            Write-Host ("INF_REL=" + $inf.FullName.Substring($expanded.Length + 1))
+            Get-Content -LiteralPath $inf.FullName | Select-String -Pattern '^\s*(DriverVer|Provider|Class|ClassGuid|CatalogFile(\.NTamd64)?|DriverPackageDisplayName)\s*=' | Select-Object -First 12 | ForEach-Object { Write-Host ("META " + $_.Line.Trim()) }
+          }
+          Write-Host '=== CAT signatures ==='
+          foreach($cat in $realCats) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $cat.FullName
+            Write-Host ("CAT=" + $cat.FullName.Substring($expanded.Length + 1) + " STATUS=" + $sig.Status + " SUBJECT=" + $sig.SignerCertificate.Subject)
+          }
+          Write-Host 'VENDOR_INSPECTION_COMPLETE'
