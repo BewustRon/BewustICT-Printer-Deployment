@@ -1,0 +1,91 @@
+name: HP Kyocera bounded INF installation diagnostics
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/hp-kyocera-bounded-diagnostics.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: windows-2025
+    timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: HP
+            url: https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip
+            hash: EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2
+            inf: hpcu360u.inf
+            name: HP Universal Printing PCL 6
+          - brand: Kyocera
+            url: https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip
+            hash: 8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E
+            inf: Kx87_UPD_8.7A.0422_en_RC1_signed/64bit/OEMSETUP.INF
+            name: Kyocera Generic color KX
+    steps:
+      - name: Inspect exact installed INF, spooler, and bounded native commands
+        shell: powershell
+        env:
+          BRAND: ${{ matrix.brand }}
+          URL: ${{ matrix.url }}
+          HASH: ${{ matrix.hash }}
+          INF: ${{ matrix.inf }}
+          MODEL: ${{ matrix.name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $base = Join-Path $env:RUNNER_TEMP ('PrinterDiag-'+$env:BRAND)
+          New-Item -ItemType Directory -Path $base -Force | Out-Null
+          $zip = Join-Path $base 'oem.zip'
+          Invoke-WebRequest -Uri $env:URL -OutFile $zip -TimeoutSec 180 -UseBasicParsing
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:HASH) { throw 'HASH_MISMATCH' }
+          $extract = Join-Path $base 'expand'
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $inf = Join-Path $extract $env:INF
+          if(-not (Test-Path -LiteralPath $inf)) {throw 'INF_NOT_FOUND'}
+          Write-Host ('BRAND='+$env:BRAND+' MODEL='+$env:MODEL+' INF='+$inf)
+          Write-Host '=== SPOOLER ==='
+          Get-Service Spooler | Format-List Name,Status,StartType
+          Write-Host '=== Driver registrations before ==='
+          Get-PrinterDriver | Where-Object Name -Match 'HP|Kyocera' | Select-Object Name,Manufacturer,MajorVersion | Format-Table -AutoSize
+          Write-Host '=== INF version, model sections ==='
+          Get-Content $inf | Select-String -Pattern '^Class\s*=|^DriverVer\s*=|^CatalogFile|^\[Manufacturer\]|^"HP Universal Printing PCL 6"|^"Kyocera Generic color KX"' | Select-Object -First 20 | ForEach-Object { Write-Host $_.Line }
+          function Invoke-Bounded {
+            param([string]$Label,[string]$Command,[int]$Seconds=55)
+            Write-Host ('=== START '+$Label+' ===')
+            $out=Join-Path $base ($Label+'.stdout.log')
+            $err=Join-Path $base ($Label+'.stderr.log')
+            $p=Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command)))) -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+            if(-not $p.WaitForExit($Seconds*1000)) {
+              try {Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue} catch {}
+              Write-Host ('COMMAND_TIMEOUT '+$Label+' '+$Seconds+'s')
+            } else {
+              $p.Refresh()
+              Write-Host ('COMMAND_EXIT '+$Label+' '+$p.ExitCode)
+            }
+            if(Test-Path $out) { Get-Content $out -ErrorAction SilentlyContinue | Select-Object -Last 75 | ForEach-Object {Write-Host ('OUT: '+$_)} }
+            if(Test-Path $err) { Get-Content $err -ErrorAction SilentlyContinue | Select-Object -Last 30 | ForEach-Object {Write-Host ('ERR: '+$_)} }
+            $registered=Get-PrinterDriver -Name $env:MODEL -ErrorAction SilentlyContinue
+            Write-Host ('DRIVER_PRESENT_AFTER_'+$Label+'='+[bool]$registered)
+          }
+          $pnp='& pnputil.exe /add-driver "'+$inf+'"; Write-Host ("PNP_LAST_EXIT="+$LASTEXITCODE)'
+          Invoke-Bounded -Label 'pnputil' -Command $pnp -Seconds 40
+          $add='Import-Module PrintManagement; Add-PrinterDriver -Name "'+$env:MODEL+'" -ErrorAction Stop; Write-Host "ADD_PRINTER_DRIVER_OK"'
+          Invoke-Bounded -Label 'adddriver' -Command $add -Seconds 40
+          $addWithInf='Import-Module PrintManagement; Add-PrinterDriver -Name "'+$env:MODEL+'" -InfPath "'+$inf+'" -ErrorAction Stop; Write-Host "ADD_DRIVER_INF_OK"'
+          Invoke-Bounded -Label 'addwithinf' -Command $addWithInf -Seconds 40
+          Write-Host '=== Driver registrations after ==='
+          Get-PrinterDriver | Where-Object Name -Match 'HP|Kyocera' | Select-Object Name,Manufacturer,MajorVersion | Format-Table -AutoSize
+          Write-Host '=== Recent setupapi INF logs ==='
+          $setupapi=Join-Path $env:WINDIR 'inf\setupapi.dev.log'
+          if(Test-Path $setupapi) {
+            Get-Content -Path $setupapi -Tail 180 | Select-Object -Last 160 | ForEach-Object {Write-Host ('SETUPAPI '+$_)}
+          }
+          Write-Host '=== Recent PrintService event messages ==='
+          Get-WinEvent -LogName 'Microsoft-Windows-PrintService/Admin' -MaxEvents 12 -ErrorAction SilentlyContinue |
+             Select-Object TimeCreated,Id,Message | Format-List | Out-String -Width 160 | Write-Host
+          Write-Host 'BOUNDED_DIAGNOSTICS_COMPLETE'
