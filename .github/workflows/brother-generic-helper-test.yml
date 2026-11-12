@@ -25,6 +25,7 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tok,[ref]$err)
           if($err.Count){$err | ForEach-Object { Write-Host $_ };throw 'PowerShell parser failed'}
           Write-Host ("HELPER_SHA256=" + (Get-FileHash $path -Algorithm SHA256).Hash)
+          Write-Host ('CENTRAL_SCRIPT_SHA256=' + (Get-FileHash .\scripts\Deploy-BewustICTPrinter.ps1 -Algorithm SHA256).Hash)
           Write-Host 'HELPER_PARSER_OK'
       - name: Install manufacturer-signed Brother PCL5e and offline queue
         shell: powershell
