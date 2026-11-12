@@ -61,7 +61,6 @@ jobs:
             $metadata=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Filter '*.devicemetadata-ms' -ErrorAction Stop)
             Write-Host ("KYOCERA_EXTRACTED_DEVICE_METADATA_FILES="+$metadata.Count)
             if($metadata.Count -eq 0){throw "KYOCERA_DEVICE_METADATA_NOT_EXTRACTED"}
-            $maxLength=($metadata | Measure-Object -Property @{Expression={$_.FullName.Length}} -Maximum).Maximum
             Write-Host ('KYOCERA_EXTRACTED_METADATA_SAMPLE='+$metadata[0].FullName)
             if(-not (Test-Path -LiteralPath $metadata[0].FullName)){throw "NESTED_METADATA_UNREADABLE"}
           }
