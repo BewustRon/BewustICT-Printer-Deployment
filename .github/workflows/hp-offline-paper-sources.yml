@@ -1,0 +1,41 @@
+name: HP Universal PCL6 offline paper source inventory
+on:
+  push:
+    branches:
+      - fix/printer-tray-driver-alias-offline-20261112
+    paths:
+      - .github/workflows/hp-offline-paper-sources.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install same HP universal PCL6 without printer and enumerate paper bins
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI HP Offline Tray Inventory'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Zwart-wit'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.1.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'HP_PRINTER_INSTALL_FAILED'}
+          Add-Type -AssemblyName System.Drawing
+          $settings = New-Object System.Drawing.Printing.PrinterSettings
+          $settings.PrinterName=$env:printerNaam
+          foreach($s in @($settings.PaperSources)){ Write-Host ("HP_DRIVER_PAPER_SOURCE='{0}' RAWKIND={1} KIND='{2}'" -f $s.SourceName,$s.RawKind,$s.Kind)}
+          $p=Get-Printer -Name $env:printerNaam
+          Write-Host ("HP_DRIVER="+$p.DriverName)
+          Write-Host "HP_OFFLINE_PAPER_SOURCE_INVENTORY_OK"
