@@ -6,6 +6,7 @@ on:
     paths:
       - scripts/Install-BrotherGenericPCL.ps1
       - scripts/Deploy-BewustICTPrinter.ps1
+      - scripts/NinjaOne-Printer-Bootstrap-v1.0.0-PILOT.ps1
       - .github/workflows/brother-generic-helper-test.yml
   workflow_dispatch:
 permissions:
@@ -59,3 +60,24 @@ jobs:
           $p = Get-Printer -Name 'BIC CI Brother Full Deployment' -ErrorAction Stop
           if ($p.DriverName -ne 'Brother PCL5e Driver') { throw 'Central deployment installed incorrect Brother driver' }
           Write-Host 'BROTHER_V1_CENTRAL_DEPLOYMENT_OK'
+
+      - name: Test pinned NinjaOne v1 launcher with environment variables
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI NinjaOne v1 Brother'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='Brother'
+          $env:kleurAfdrukken='Zwart-wit'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -File .\scripts\NinjaOne-Printer-Bootstrap-v1.0.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0) {throw 'NinjaOne v1 launcher failed'}
+          $printer=Get-Printer -Name $env:printerNaam -ErrorAction Stop
+          if($printer.DriverName -ne 'Brother PCL5e Driver') {throw 'NinjaOne launcher selected the wrong Brother driver'}
+          Write-Host 'NINJAONE_V1_BROTHER_ZERO_TOUCH_OK'
