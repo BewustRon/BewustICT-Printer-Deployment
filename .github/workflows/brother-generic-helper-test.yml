@@ -46,3 +46,14 @@ jobs:
             throw 'BROTHER_GENERIC_QUEUE_FAILED'
           }
           Write-Host 'BROTHER_GENERIC_OFFLINE_QUEUE_OK'
+
+      - name: Verify central printerdeploy uses Brother PCL5e instead of discovery
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cmd = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+          & $cmd -NoProfile -NonInteractive -File .\scripts\Deploy-BewustICTPrinter.ps1 -Actie Installeren -PrinterNaam 'BIC CI Brother Full Deployment' -PrinterIpAdres '192.0.2.50' -PrinterMerk Brother -KleurAfdrukken 'Zwart-wit' -DubbelzijdigAfdrukken Uit -Papierformaat A4 -Papierlade Automatisch
+          if ($LASTEXITCODE -ne 0) { throw 'Central Brother deployment failed' }
+          $p = Get-Printer -Name 'BIC CI Brother Full Deployment' -ErrorAction Stop
+          if ($p.DriverName -ne 'Brother PCL5e Driver') { throw 'Central deployment installed incorrect Brother driver' }
+          Write-Host 'BROTHER_V1_CENTRAL_DEPLOYMENT_OK'
