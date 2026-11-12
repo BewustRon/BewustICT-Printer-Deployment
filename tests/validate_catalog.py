@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 path = pathlib.Path(__file__).resolve().parents[1] / 'catalog' / 'drivers.json'
 catalog = json.loads(path.read_text(encoding='utf-8'))
-assert catalog['schemaVersion'] == 1
+assert catalog['schemaVersion'] == 2
 assert set(catalog['drivers']) == {'HP', 'Epson', 'Canon', 'Kyocera', 'Ricoh', 'Brother'}
 
 # Full candidate metadata is permitted while still pending; deployment must
