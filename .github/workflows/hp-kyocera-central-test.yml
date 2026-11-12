@@ -31,7 +31,7 @@ jobs:
           EXPECTED_DRIVER: ${{ matrix.expected_driver }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $catalog = 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/fix/hp-kyocera-zero-touch-publisher-trust-20261112/catalog/drivers.json'
+          $catalog = 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/' + $env:GITHUB_SHA + '/catalog/drivers.json'
           $name='BIC CI '+$env:VENDOR+' Universal Color'
           $args = @(
               '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
