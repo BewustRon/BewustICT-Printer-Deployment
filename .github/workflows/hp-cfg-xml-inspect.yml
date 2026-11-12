@@ -1,0 +1,46 @@
+name: HP UPD vendor XML CFG capabilities inspect
+on:
+  push:
+    branches:
+      - fix/hp-upd-offline-color-duplex-tray3-20261112
+    paths:
+      - .github/workflows/hp-cfg-xml-inspect.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Inspect official HP UPD XML configuration values for color and tray3 offline
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+          $zip=Join-Path $env:RUNNER_TEMP 'oem.zip'
+          & "$env:WINDIR\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 --output $zip 'https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip'
+          if($LASTEXITCODE -ne 0){throw 'HP_DOWNLOAD_FAILED'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne 'EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2'){throw 'HP_HASH_MISMATCH'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead($zip)
+          try{
+            $e=$z.Entries|Where-Object FullName -eq 'hpcpu360.cfg'|Select-Object -First 1
+            if(-not $e){throw 'HP_CFG_MISSING'}
+            $r=New-Object IO.StreamReader($e.Open())
+            try{$txt=$r.ReadToEnd()} finally{$r.Dispose()}
+          }finally{$z.Dispose()}
+          [xml]$xml=$txt
+          Write-Host ('ROOT_NAME='+$xml.DocumentElement.Name)
+          Write-Host ('XML_TOP_CHILDREN='+(@($xml.DocumentElement.ChildNodes|ForEach-Object {$_.Name}) -join ','))
+          $lines=@($txt -split "\r?\n")
+          Write-Host ('CFG_LINES='+$lines.Count)
+          $words=@('DeviceType','Device Type','Tray 3','Tray3','Duplex','Grayscale','Color')
+          foreach($word in $words){
+            $hits=@(for($i=0;$i -lt $lines.Count;$i++){if($lines[$i].IndexOf($word,[StringComparison]::OrdinalIgnoreCase) -ge 0){$i}})
+            Write-Host ('MATCH_TERM='+$word+' COUNT='+$hits.Count)
+            foreach($idx in ($hits|Select-Object -First 5)){
+              $begin=[Math]::Max(0,$idx-3);$end=[Math]::Min($lines.Count-1,$idx+5)
+              for($k=$begin;$k -le $end;$k++){Write-Host ('XML_LINE_'+($k+1)+' '+$lines[$k].Trim())}
+            }
+          }
+          Write-Host 'HP_CFG_XML_INSPECTION_OK'
