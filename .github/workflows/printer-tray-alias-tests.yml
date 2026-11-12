@@ -1,0 +1,59 @@
+name: Universal offline paper tray resolver tests
+on:
+  push:
+    branches:
+      - fix/printer-tray-driver-alias-offline-20261112
+    paths:
+      - scripts/Set-BewustICTPrinterTray.ps1
+      - .github/workflows/printer-tray-alias-tests.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2025
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test offline driver-specific tray alias map and fail closed
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $env:GITHUB_WORKSPACE 'scripts\Set-BewustICTPrinterTray.ps1'
+          $tokens=$null; $errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors | ForEach-Object { Write-Host $_ }; throw 'TRAY_SCRIPT_PARSER_FAILED'}
+          $functions=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-BICPaperSource'},$true))
+          if($functions.Count -ne 1){throw 'RESOLVER_FUNCTION_NOT_FOUND'}
+          . ([scriptblock]::Create($functions[0].Extent.Text))
+          function Source([string]$n,[int]$k){ [pscustomobject]@{SourceName=$n;RawKind=$k} }
+          $tests=@(
+            @{req='Cassette 2';sources=@((Source 'Tray 2' 260));want='Tray 2'},
+            @{req='Cassette 2';sources=@((Source 'Lade 2' 261));want='Lade 2'},
+            @{req='Cassette 2';sources=@((Source 'Papierlade 2' 262));want='Papierlade 2'},
+            @{req='Cassette 2';sources=@((Source 'Cassette 2' 263));want='Cassette 2'},
+            @{req='Cassette 2';sources=@((Source 'Tray 2 (500 sheets)' 264));want='Tray 2 (500 sheets)'},
+            @{req='Cassette 2';sources=@((Source 'Paper Tray 2' 265));want='Paper Tray 2'},
+            @{req='Cassette 1';sources=@((Source 'Cassette 1' 266));want='Cassette 1'},
+            @{req='Cassette 4';sources=@((Source 'Tray 4' 267));want='Tray 4'}
+          )
+          foreach($t in $tests){
+            $got=Resolve-BICPaperSource -Sources $t.sources -Requested $t.req
+            if($got.SourceName -ne $t.want) {throw "ALIAS_TEST_FAILED expected=$($t.want) got=$($got.SourceName)"}
+            Write-Host ("TRAY_ALIAS_OK requested="+$t.req+" actual="+$got.SourceName)
+          }
+          foreach($scenario in @('Missing','Ambiguous','WrongNumber')){
+            $s=switch($scenario){
+              'Missing' { @((Source 'Automatisch selecteren' 15),(Source 'Printer auto select' 7)) }
+              'Ambiguous' { @((Source 'Tray 2' 260),(Source 'Lade 2' 261)) }
+              'WrongNumber' { @((Source 'Tray 20' 260),(Source 'Tray 3' 261)) }
+            }
+            try {
+              $got=Resolve-BICPaperSource -Sources $s -Requested 'Cassette 2'
+              throw "SECURITY_FAILURE_SHOULD_REJECT_$scenario"
+            } catch {
+              if($_.Exception.Message -like 'SECURITY_FAILURE*'){throw}
+              Write-Host ('EXPECTED_STRICT_REFUSAL='+$scenario+' '+$_.Exception.Message)
+            }
+          }
+          Write-Host 'UNIVERSAL_OFFLINE_TRAY_ALIASES_PASS'
