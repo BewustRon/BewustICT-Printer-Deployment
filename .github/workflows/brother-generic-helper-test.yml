@@ -33,6 +33,13 @@ jobs:
           Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/58a39dfe1985f010add74be242747e034128538b/scripts/Deploy-BewustICTPrinter.ps1' -UseBasicParsing -OutFile $rawCentral
           Write-Host ('RAW_HELPER_SHA256=' + (Get-FileHash $rawHelper -Algorithm SHA256).Hash)
           Write-Host ('RAW_CENTRAL_SHA256=' + (Get-FileHash $rawCentral -Algorithm SHA256).Hash)
+          $rawCurrent=Join-Path $env:TEMP 'BIC-RAW-CURRENT-CENTRAL.ps1'
+          $rawUrl='https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/'+$env:GITHUB_SHA+'/scripts/Deploy-BewustICTPrinter.ps1'
+          Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -OutFile $rawCurrent
+          Write-Host ('RAW_CURRENT_CENTRAL_SHA256=' + (Get-FileHash $rawCurrent -Algorithm SHA256).Hash)
+          if((Get-FileHash $rawHelper -Algorithm SHA256).Hash -ne '5E2CFF3BDE50D0F5FA6B965FB1F35D2A2AEEDE69F8D494E4694804B51D058C58') {throw 'BROTHER_RAW_HELPER_SHA_MISMATCH'}
+          if(-not ((Get-Content $rawCurrent -Raw) -match "5E2CFF3BDE50D0F5FA6B965FB1F35D2A2AEEDE69F8D494E4694804B51D058C58")) {throw 'BROTHER_HELPER_INTEGRITY_PIN_NOT_UPDATED'}
+
           Write-Host 'HELPER_PARSER_OK'
       - name: Install manufacturer-signed Brother PCL5e and offline queue
         shell: powershell
