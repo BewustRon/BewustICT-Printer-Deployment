@@ -1,0 +1,104 @@
+name: HP Kyocera signed publisher pin pilot (isolated CI)
+on:
+  push:
+    branches:
+      - fix/hp-kyocera-catalog-20261112
+    paths:
+      - .github/workflows/hp-kyocera-signer-pilot.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publisher-test:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: HP
+            url: https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip
+            sha: EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2
+            inf: hpcu360u.inf
+            cat: hpcu360u.cat
+            publisher: HP Inc.
+            driver: HP Universal Printing PCL 6
+          - brand: Kyocera
+            url: https://www.kyoceradocumentsolutions.eu/content/dam/download-center-cf/eu/drivers/all/KX_Universal_Printer_Driver_zip.download.zip
+            sha: 8D8052D26269B47AFC6D2B9066670BCCD13977D13E586AF15F4E302C5D28CD8E
+            inf: Kx87_UPD_8.7A.0422_en_RC1_signed/64bit/OEMSETUP.INF
+            cat: Kx87_UPD_8.7A.0422_en_RC1_signed/64bit/KYOMITA.CAT
+            publisher: KYOCERA Document Solutions Inc.
+            driver: Kyocera Generic color KX
+    steps:
+      - name: Probe trusted publisher requirement on disposable Windows runner
+        shell: powershell
+        env:
+          BRAND: ${{ matrix.brand }}
+          URL: ${{ matrix.url }}
+          SHA: ${{ matrix.sha }}
+          INF: ${{ matrix.inf }}
+          CAT: ${{ matrix.cat }}
+          PUBLISHER: ${{ matrix.publisher }}
+          DRIVER: ${{ matrix.driver }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $dir=Join-Path $env:RUNNER_TEMP ('SignedPublisher-'+$env:BRAND)
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $zip=Join-Path $dir 'official.zip'
+          Invoke-WebRequest -Uri $env:URL -OutFile $zip -UseBasicParsing -TimeoutSec 180
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:SHA){throw 'ZIP_SHA_MISMATCH'}
+          $extract=Join-Path $dir 'expand'
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $inf=Join-Path $extract $env:INF
+          $cat=Join-Path $extract $env:CAT
+          if(-not (Test-Path $inf) -or -not (Test-Path $cat)){throw 'CAT_OR_INF_MISSING'}
+          $signature=Get-AuthenticodeSignature -LiteralPath $cat
+          if($signature.Status -ne 'Valid'){throw 'CAT_SIGNATURE_INVALID'}
+          $cert=$signature.SignerCertificate
+          Write-Host ('SIGNER_SUBJECT='+$cert.Subject)
+          Write-Host ('SIGNER_THUMBPRINT='+$cert.Thumbprint)
+          Write-Host ('SIGNER_NOTBEFORE='+$cert.NotBefore.ToString('o'))
+          Write-Host ('SIGNER_NOTAFTER='+$cert.NotAfter.ToString('o'))
+          if($cert.Subject -notmatch [regex]::Escape($env:PUBLISHER)){throw 'WRONG_OEM_SIGNER'}
+          $store=New-Object Security.Cryptography.X509Certificates.X509Store('TrustedPublisher','LocalMachine')
+          $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+          try {
+            $prior=@($store.Certificates.Find([Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,$cert.Thumbprint,$false))
+            Write-Host ('BEFORE_TRUSTED_PUBLISHER='+$prior.Count)
+            $store.Add($cert)
+            $after=@($store.Certificates.Find([Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,$cert.Thumbprint,$false))
+            if($after.Count -eq 0){throw 'PUBLISHER_CERT_NOT_REGISTERED'}
+            Write-Host ('PUBLISHER_TEMPORARILY_TRUSTED_IN_ISOLATED_CI='+$cert.Thumbprint)
+          } finally { $store.Close() }
+          $stdout=Join-Path $dir 'pnputil.out'
+          $stderr=Join-Path $dir 'pnputil.err'
+          $p=Start-Process -FilePath "$env:WINDIR\System32\pnputil.exe" -ArgumentList ('/add-driver "'+$inf+'"') -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if(-not $p.WaitForExit(115000)) {
+            try{Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}catch{}
+            Write-Host 'PNPUTIL_TIMEOUT_115_SEC'
+          }else{ $p.Refresh();Write-Host ('PNPUTIL_EXIT='+$p.ExitCode) }
+          if(Test-Path $stdout){Get-Content $stdout | Select-Object -Last 30 | ForEach-Object{Write-Host ('PNP: '+$_)}}
+          if(Test-Path $stderr){Get-Content $stderr | Select-Object -Last 20 | ForEach-Object{Write-Host ('PNPERR: '+$_)}}
+          try {
+            Add-PrinterDriver -Name $env:DRIVER -ErrorAction Stop
+            Write-Host 'ADD_PRINTER_DRIVER_OK'
+          }catch{
+            Write-Host ('ADD_PRINTER_DRIVER_ERROR='+$_.Exception.Message)
+          }
+          $installed=Get-PrinterDriver -Name $env:DRIVER -ErrorAction SilentlyContinue
+          if($installed){
+            Write-Host ('DRIVER_REGISTERED='+$installed.Name)
+            $port='BIC_SIGNER_TEST_192.0.2.50'
+            Add-PrinterPort -Name $port -PrinterHostAddress '192.0.2.50' -PortNumber 9100 -ErrorAction Stop
+            Add-Printer -Name ('BIC CI '+$env:BRAND) -PortName $port -DriverName $env:DRIVER -ErrorAction Stop
+            Write-Host 'OFFLINE_PRINTER_QUEUE_CREATED'
+          }else{
+            $logFile=Join-Path $env:WINDIR 'inf\setupapi.dev.log'
+            if(Test-Path $logFile){
+              Get-Content $logFile -Tail 160 | Where-Object {$_ -match '!!!|!    sig:|Error|exit\(0x|publisher|signed|signer'} | Select-Object -Last 35 | ForEach-Object {Write-Host ('SETUPAPI '+$_)}
+            }
+            throw 'DRIVER_STILL_NOT_REGISTERED_AFTER_PUBLISHER_TRUST'
+          }
+          Write-Host 'SIGNED_PUBLISHER_INSTALL_TEST_PASSED'
