@@ -1,0 +1,40 @@
+name: HP PCL6 - strict offline Cassette 2 end-to-end
+on:
+  push:
+    branches:
+      - fix/printer-tray-driver-alias-offline-20261112
+    paths:
+      - .github/workflows/hp-strict-offline-tray2.yml
+      - scripts/Deploy-BewustICTPrinter.ps1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hp:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install HP universal queue and enforce Tray 2 offline with NinjaOne logical Cassette 2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script=Join-Path $env:GITHUB_WORKSPACE 'scripts\Deploy-BewustICTPrinter.ps1'
+          $name='BIC CI HP strict offline Tray2'
+          $ps="$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Actie Installeren -PrinterNaam $name -PrinterIpAdres '192.0.2.50' -PrinterMerk HP -KleurAfdrukken 'Zwart-wit' -DubbelzijdigAfdrukken Uit -Papierformaat A4 -Papierlade 'Cassette 2'
+          $code=$LASTEXITCODE
+          Write-Host ('CENTRAL_EXIT='+$code)
+          $printer=Get-Printer -Name $name -ErrorAction SilentlyContinue
+          if($printer){
+            Add-Type -AssemblyName System.Drawing
+            $settings=New-Object System.Drawing.Printing.PrinterSettings
+            $settings.PrinterName=$name
+            foreach($s in @($settings.PaperSources)) {
+              Write-Host ("PAPER_SOURCE: {0} (RawKind={1})" -f $s.SourceName,$s.RawKind)
+            }
+            $current=$settings.DefaultPageSettings.PaperSource
+            Write-Host ("CURRENT_PAPER_SOURCE="+$current.SourceName+" RAWKIND="+$current.RawKind)
+          }
+          if($code -ne 0){throw 'STRICT_OFFLINE_TRAY2_NOT_YET_WORKING'}
+          Write-Host 'HP_STRICT_OFFLINE_TRAY2_VERIFIED'
