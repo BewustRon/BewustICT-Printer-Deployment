@@ -316,7 +316,7 @@ function Install-BrotherGenericPCL {
         return $Name
     }
     $Pin='a2e5f73c3c3e55d019840b654793e6c5e24cd6b2'
-    $Hash='EAD10C503072EB3788AF96824E4BCA2331D2F2EDF13D68DDE487AF0480547298'
+    $Hash='5E2CFF3BDE50D0F5FA6B965FB1F35D2A2AEEDE69F8D494E4694804B51D058C58'
     $Url="https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/$Pin/scripts/Install-BrotherGenericPCL.ps1"
     [void](Test-Https -Url $Url)
     $Dir=Join-Path $PkgDir 'Brother-EnhancedGeneric-PCL5e-1.09'
