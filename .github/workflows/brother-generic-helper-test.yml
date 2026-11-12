@@ -1,0 +1,128 @@
+name: Brother Generic PCL - scripted zero-touch Windows test
+on:
+  push:
+    branches:
+      - fix/brother-pcl5e-no-discovery-20261112
+    paths:
+      - scripts/Install-BrotherGenericPCL.ps1
+      - scripts/Deploy-BewustICTPrinter.ps1
+      - scripts/NinjaOne-Printer-Bootstrap-v1.0.0-PILOT.ps1
+      - .github/workflows/brother-generic-helper-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and record immutable SHA256 of helper
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Resolve-Path .\scripts\Install-BrotherGenericPCL.ps1
+          $tok=$null;$err=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tok,[ref]$err)
+          if($err.Count){$err | ForEach-Object { Write-Host $_ };throw 'PowerShell parser failed'}
+          Write-Host ("HELPER_SHA256=" + (Get-FileHash $path -Algorithm SHA256).Hash)
+          Write-Host ('CENTRAL_SCRIPT_SHA256=' + (Get-FileHash .\scripts\Deploy-BewustICTPrinter.ps1 -Algorithm SHA256).Hash)
+          $rawHelper=Join-Path $env:TEMP 'BIC-RAW-HELPER.ps1'
+          $rawCentral=Join-Path $env:TEMP 'BIC-RAW-CENTRAL.ps1'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/a2e5f73c3c3e55d019840b654793e6c5e24cd6b2/scripts/Install-BrotherGenericPCL.ps1' -UseBasicParsing -OutFile $rawHelper
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/58a39dfe1985f010add74be242747e034128538b/scripts/Deploy-BewustICTPrinter.ps1' -UseBasicParsing -OutFile $rawCentral
+          Write-Host ('RAW_HELPER_SHA256=' + (Get-FileHash $rawHelper -Algorithm SHA256).Hash)
+          Write-Host ('RAW_CENTRAL_SHA256=' + (Get-FileHash $rawCentral -Algorithm SHA256).Hash)
+          $rawCurrent=Join-Path $env:TEMP 'BIC-RAW-CURRENT-CENTRAL.ps1'
+          $rawUrl='https://raw.githubusercontent.com/BewustRon/BewustICT-Printer-Deployment/'+$env:GITHUB_SHA+'/scripts/Deploy-BewustICTPrinter.ps1'
+          Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -OutFile $rawCurrent
+          Write-Host ('RAW_CURRENT_CENTRAL_SHA256=' + (Get-FileHash $rawCurrent -Algorithm SHA256).Hash)
+          if((Get-FileHash $rawHelper -Algorithm SHA256).Hash -ne '5E2CFF3BDE50D0F5FA6B965FB1F35D2A2AEEDE69F8D494E4694804B51D058C58') {throw 'BROTHER_RAW_HELPER_SHA_MISMATCH'}
+          if(-not ((Get-Content $rawCurrent -Raw) -match "5E2CFF3BDE50D0F5FA6B965FB1F35D2A2AEEDE69F8D494E4694804B51D058C58")) {throw 'BROTHER_HELPER_INTEGRITY_PIN_NOT_UPDATED'}
+
+          Write-Host 'HELPER_PARSER_OK'
+      - name: Install manufacturer-signed Brother PCL5e and offline queue
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $output= & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\Install-BrotherGenericPCL.ps1 2>&1
+          $code=$LASTEXITCODE
+          foreach($line in @($output)) {Write-Host ([string]$line)}
+          if($code -ne 0){throw "BROTHER_GENERIC_HELPER_EXIT=$code"}
+          if(-not (@($output|ForEach-Object {[string]$_}) -match '^BROTHER_GENERIC_DRIVER_OK$')){
+            throw 'Missing Brother driver verified marker'
+          }
+          Import-Module PrintManagement
+          $driver=Get-PrinterDriver -Name 'Brother PCL5e Driver' -ErrorAction Stop
+          $portName='BIC_CI_BROTHER_GENERIC_192.0.2.50'
+          Add-PrinterPort -Name $portName -PrinterHostAddress '192.0.2.50' -PortNumber 9100
+          Add-Printer -Name 'BIC CI - Brother PCL5e' -DriverName $driver.Name -PortName $portName
+          $p=Get-Printer -Name 'BIC CI - Brother PCL5e' -ErrorAction Stop
+          if($p.DriverName -ne $driver.Name -or $p.PortName -ne $portName) {
+            throw 'BROTHER_GENERIC_QUEUE_FAILED'
+          }
+          Write-Host 'BROTHER_GENERIC_OFFLINE_QUEUE_OK'
+
+      - name: Verify central printerdeploy uses Brother PCL5e instead of discovery
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cmd = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+          & $cmd -NoProfile -NonInteractive -File .\scripts\Deploy-BewustICTPrinter.ps1 -Actie Installeren -PrinterNaam 'BIC CI Brother Full Deployment' -PrinterIpAdres '192.0.2.50' -PrinterMerk Brother -KleurAfdrukken 'Zwart-wit' -DubbelzijdigAfdrukken Uit -Papierformaat A4 -Papierlade Automatisch
+          if ($LASTEXITCODE -ne 0) { throw 'Central Brother deployment failed' }
+          $p = Get-Printer -Name 'BIC CI Brother Full Deployment' -ErrorAction Stop
+          if ($p.DriverName -ne 'Brother PCL5e Driver') { throw 'Central deployment installed incorrect Brother driver' }
+          Write-Host 'BROTHER_V1_CENTRAL_DEPLOYMENT_OK'
+
+      - name: Test pinned NinjaOne v1 launcher with environment variables
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI NinjaOne v1 Brother'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='Brother'
+          $env:kleurAfdrukken='Zwart-wit'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -File .\scripts\NinjaOne-Printer-Bootstrap-v1.0.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0) {throw 'NinjaOne v1 launcher failed'}
+          $printer=Get-Printer -Name $env:printerNaam -ErrorAction Stop
+          if($printer.DriverName -ne 'Brother PCL5e Driver') {throw 'NinjaOne launcher selected the wrong Brother driver'}
+          Write-Host 'NINJAONE_V1_BROTHER_ZERO_TOUCH_OK'
+
+  cold-install:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cold install via NinjaOne bootstrap on fresh Windows runner
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Import-Module PrintManagement -ErrorAction Stop
+          if(Get-PrinterDriver -Name 'Brother PCL5e Driver' -ErrorAction SilentlyContinue){
+            throw 'Fresh runner already contains tested Brother generic driver'
+          }
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI Brother Cold Install'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='Brother'
+          $env:kleurAfdrukken='Zwart-wit'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -File .\scripts\NinjaOne-Printer-Bootstrap-v1.0.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'BROTHER_COLD_INSTALL_FAILED'}
+          $queue=Get-Printer -Name $env:printerNaam -ErrorAction Stop
+          if($queue.DriverName -ne 'Brother PCL5e Driver'){throw 'Wrong driver on clean runner'}
+          $port=Get-PrinterPort -Name $queue.PortName -ErrorAction Stop
+          if($port.PrinterHostAddress -ne '192.0.2.50'){throw 'Wrong printer IP'}
+          Write-Host 'BROTHER_V1_COLD_INSTALL_ZERO_TOUCH_OK'
