@@ -1,0 +1,77 @@
+name: HP UPD PCL6 offline color duplex tray3 capability diagnostics
+on:
+  push:
+    branches:
+      - fix/hp-upd-offline-color-duplex-tray3-20261112
+    paths:
+      - .github/workflows/hp-color-duplex-tray-diagnostic.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install HP UPD PCL6 offline and inspect color duplex and source capabilities
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC HP CI Offline Capabilities'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Zwart-wit'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.0-PILOT.ps1
+          if($LASTEXITCODE -ne 0) {throw 'BASIC_HP_INSTALL_FAILED'}
+          Import-Module PrintManagement
+          Add-Type -AssemblyName System.Drawing
+          $settings=New-Object System.Drawing.Printing.PrinterSettings
+          $settings.PrinterName=$env:printerNaam
+          $p=Get-Printer -Name $env:printerNaam -ErrorAction Stop
+          Write-Host ("PRINTER_DRIVER="+$p.DriverName)
+          Write-Host ("PRINTER_CAPS_COLOR="+$settings.SupportsColor+" DUPLEX="+$settings.CanDuplex)
+          foreach($s in @($settings.PaperSources)) {
+            if($s.SourceName -match '(?i)tray|lade|cassette|auto|manual') {
+              Write-Host ("SOURCE='"+$s.SourceName+"' RAW="+$s.RawKind)
+            }
+          }
+          $before=Get-PrintConfiguration -PrinterName $env:printerNaam -ErrorAction Stop
+          Write-Host ("BEFORE_DEFAULT_COLOR="+$before.Color+" DUPLEX="+$before.DuplexingMode+" PAPERSIZE="+$before.PaperSize)
+          foreach($test in @(
+            @{name='ColorTrue';color=$true;duplex='OneSided'},
+            @{name='DuplexLong';color=$false;duplex='TwoSidedLongEdge'},
+            @{name='ColorDuplexLong';color=$true;duplex='TwoSidedLongEdge'},
+            @{name='ColorDuplexShort';color=$true;duplex='TwoSidedShortEdge'}
+          )) {
+            Write-Host ("=== START_TEST_"+$test.name+" ===")
+            try {
+              Set-PrintConfiguration -PrinterName $env:printerNaam -Color $test.color -DuplexingMode $test.duplex -PaperSize A4 -ErrorAction Stop
+              Write-Host ("SET_SUCCESS="+$test.name)
+            }catch {
+              Write-Host ("SET_FAILED="+$test.name+" MESSAGE="+$_.Exception.Message)
+            }
+            $now=Get-PrintConfiguration -PrinterName $env:printerNaam -ErrorAction Stop
+            $settings=New-Object System.Drawing.Printing.PrinterSettings
+            $settings.PrinterName=$env:printerNaam
+            Write-Host ("RESULT="+$test.name+" DEFAULT_COLOR="+$now.Color+" DUPLEX="+$now.DuplexingMode+" CAPS_COLOR="+$settings.SupportsColor+" CAPS_DUPLEX="+$settings.CanDuplex)
+            $ticket=[string]$now.PrintTicketXml
+            if($ticket) {
+              try {
+                [xml]$xml=$ticket
+                $features=@($xml.SelectNodes("//*[local-name()='Feature' and (@name='psk:PageOutputColor' or @name='psk:JobDuplexAllDocumentsContiguously')]"))
+                foreach($feature in $features) {
+                  $options=@($feature.SelectNodes("./*[local-name()='Option']") | ForEach-Object {$_.GetAttribute('name')})
+                  Write-Host ("PRINTTICKET_FEATURE="+$feature.GetAttribute('name')+" OPT="+($options -join ','))
+                }
+              }catch {Write-Host ('TICKET_PARSE_WARNING='+$_.Exception.Message)}
+            }
+          }
+          Write-Host 'HP_OFFLINE_COLOR_DUPLEX_CAPABILITY_DIAGNOSTIC_COMPLETE'
