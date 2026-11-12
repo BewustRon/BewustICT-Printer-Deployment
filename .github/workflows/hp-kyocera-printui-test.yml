@@ -51,7 +51,7 @@ jobs:
           if(-not (Test-Path -LiteralPath $inf)){throw "INF_MISSING=$inf"}
           Write-Host "OEM_INSTALL_START BRAND=$env:OEM_BRAND MODEL=$env:OEM_MODEL"
           $native=Join-Path $env:WINDIR 'System32\rundll32.exe'
-          $args='printui.dll,PrintUIEntry /ia /q /m "{0}" /h x64 /v 3 /f "{1}"' -f $env:OEM_MODEL,$inf
+          $args='printui.dll,PrintUIEntry /ia /q /m "{0}" /h x64 /v "Type 3 - User Mode" /f "{1}"' -f $env:OEM_MODEL,$inf
           Write-Host "RUN: rundll32.exe $args"
           $p=Start-Process -FilePath $native -ArgumentList $args -PassThru -NoNewWindow
           if(-not $p.WaitForExit(135000)){
