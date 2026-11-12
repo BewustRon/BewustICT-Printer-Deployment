@@ -1,4 +1,4 @@
-# Bewust ICT - NinjaOne printerdeployment v1.1.0-PILOT
+# Bewust ICT - NinjaOne printerdeployment v1.2.0-PILOT
 
 ## Eén automation, één universele fabrikantdriver per merk
 
@@ -10,7 +10,7 @@ Het beoogde eindresultaat is een volledig door NinjaOne aangestuurde installatie
 
 Vervang voor een HP-, Kyocera- of Brother-pilot de volledige inhoud van de bestaande NinjaOne-automation door:
 
-[`scripts/NinjaOne-Printer-Bootstrap-v1.1.0-PILOT.ps1`](../scripts/NinjaOne-Printer-Bootstrap-v1.1.0-PILOT.ps1)
+[`scripts/NinjaOne-Printer-Bootstrap-v1.2.0-PILOT.ps1`](../scripts/NinjaOne-Printer-Bootstrap-v1.2.0-PILOT.ps1)
 
 De bootstrap is aan een specifieke commit en SHA256 gepind; wijzigingen aan losse `main`-scripts wijzigen de ingeplakte NinjaOne-automation niet. De bootstrap erft NinjaOne Script Variables als procesomgevingsvariabelen. Voer uit via **Windows PowerShell 5.1 x64**, **Run as SYSTEM**.
 
@@ -31,6 +31,18 @@ De bootstrap is aan een specifieke commit en SHA256 gepind; wijzigingen aan loss
 
 Geen handmatige Parameters instellen en geen oude `bi*`-variabelen laten staan.
 
+## Verplichte papierlade ook zonder printerverbinding (v1.2.0)
+
+Het NinjaOne-veld `papierlade` gebruikt **logische lade-nummers**, niet de letterlijke Windows-drivertekst. `Cassette 2` betekent **fysieke lade 2** en wordt door de nieuwe helper afgezet tegen de **offline geadverteerde bronnen van de reeds geïnstalleerde fabrikantdriver**:
+
+- HP Universal PCL 6: `Cassette 2` → `Tray 2` / `Lade 2` (offline op schone Windows GitHub-runner daadwerkelijk `Tray 2` met `RawKind=260`).
+- Epson: `Cassette 2` → `Cassette 2`.
+- Andere OEM-drivers: `Tray 1..4`, `Lade 1..4`, `Papierlade 1..4`, `Cassette 1..4` en `Paper Tray 1..4` worden **alleen bij exact één werkelijk gerapporteerde bron** als synoniemen behandeld.
+
+De helper schrijft de **bij die driver geregistreerde RawKind** in de globale printer-DEVMODE via Windows-spooler-API's en leest de opgeslagen waarde terug. Er wordt **geen** printerdetectie, SNMP, WSD of netwerkaansluiting gebruikt. De printer hoeft dus niet op kantoor aanwezig te zijn. Er wordt **nooit** stilzwijgend teruggevallen op Automatisch selecteren of blind een ongedocumenteerd RAW-ID gekozen. Bij ontbrekende of meerdere passende ladebeschrijvingen eindigt de pilot met `TRAY_NOT_ADVERTISED_OFFLINE` / `TRAY_AMBIGUOUS`. De printerqueue kan dan al bestaan; pas de lademapping/capability gecontroleerd aan en voer `Installeren` opnieuw uit.
+
+**Verificatiegrens:** deze controle bewijst dat de Windows-driver de gekozen lade als globale standaard accepteert. Het bewijst niet dat de daadwerkelijke printer die fysieke lade bezit of dat een applicatie- of gebruikersprofiel met eigen afdrukvoorkeuren niet anders print. Controleer bij de klant één fysieke afdruk.
+
 ## Huidige driverstatus
 
 | Merk | Automatische driverinstallatie | Driver / opmerking |
@@ -47,7 +59,7 @@ De oude `Brother Mono Universal Printer (PCL)` is **niet** geschikt voor deze ze
 ## HP/Kyocera v1.1 - beveiliging, compatibiliteit en pilot
 
 - **Volledig automatisch**: één universele OEM-driver per merk, zonder printermodel en zonder handmatige driverinstallatie.
-- **Belangrijk:** vanaf deze release gebruikt `catalog/drivers.json` schemaVersion 2. Oude v0.9/v1.0-launchers stoppen bij HP/Kyocera daarom veilig vóór installatie. Vervang de vastgepinde launcher door **v1.1.0-PILOT**.
+- **Belangrijk:** vanaf deze release gebruikt `catalog/drivers.json` schemaVersion 2. Oude v0.9/v1.0-launchers stoppen bij HP/Kyocera daarom veilig vóór installatie. Vervang de vastgepinde launcher door **v1.2.0-PILOT**.
 - De fabrikantdownload wordt via SHA256 en de CAT-ondertekening gevalideerd. Het script controleert ook de *exacte* fingerprint en voegt zo nodig uitsluitend het overeenkomstige certificaat toe aan `LocalMachine\TrustedPublisher`, nooit aan Root. **Dit verleent het OEM-signercertificaat machinebrede uitgeversvertrouwensrechten**. Bij mislukte driverstaging wordt een nieuw toegevoegde trust zo mogelijk teruggedraaid.
 - **Certificaatrotatie:** Kyocera's gecontroleerde signingcertificaat verloopt op **8 december 2026**; HP's op **19 april 2027**. Update het gecertificeerde OEM-pakket vóór die datum.
 - **Pilot:** kies `Installeren`, `printerMerk=HP` of `Kyocera`, vul naam/IP en afdrukinstellingen in, laat `driverNaam` leeg. Controleer na `NINJAONE_PRINTER_AUTOMATION_OK` met `Get-Printer -Name '<printer>'` de driver, poort en een echte fysieke afdruk. Geen model-specifieke code; printertaal en RAW TCP/9100 moeten wel ondersteund zijn.
