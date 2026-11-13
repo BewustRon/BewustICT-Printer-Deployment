@@ -1,4 +1,4 @@
-# Bewust ICT - NinjaOne printerdeployment v1.2.1-PILOT
+# Bewust ICT - NinjaOne printerdeployment v1.3.0-PILOT
 
 ## Eén automation, één universele fabrikantdriver per merk
 
@@ -10,7 +10,7 @@ Het beoogde eindresultaat is een volledig door NinjaOne aangestuurde installatie
 
 Vervang voor een HP-, Kyocera- of Brother-pilot de volledige inhoud van de bestaande NinjaOne-automation door:
 
-[`scripts/NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1`](../scripts/NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1)
+[`scripts/NinjaOne-Printer-Bootstrap-v1.3.0-PILOT.ps1`](../scripts/NinjaOne-Printer-Bootstrap-v1.3.0-PILOT.ps1)
 
 De bootstrap is aan een specifieke commit en SHA256 gepind; wijzigingen aan losse `main`-scripts wijzigen de ingeplakte NinjaOne-automation niet. De bootstrap erft NinjaOne Script Variables als procesomgevingsvariabelen. Voer uit via **Windows PowerShell 5.1 x64**, **Run as SYSTEM**.
 
@@ -43,6 +43,41 @@ De helper schrijft de **bij die driver geregistreerde RawKind** in de globale pr
 
 **Verificatiegrens:** deze controle bewijst dat de Windows-driver de gekozen lade als globale standaard accepteert. Het bewijst niet dat de daadwerkelijke printer die fysieke lade bezit of dat een applicatie- of gebruikersprofiel met eigen afdrukvoorkeuren niet anders print. Controleer bij de klant één fysieke afdruk.
 
+## HP kleurcapaciteit bij offline installatie (v1.3.0-PILOT)
+
+`Get-PrintConfiguration.Color=True` is uitsluitend de **standaardafdrukvoorkeur**.
+De HP UPD PCL6 kan tegelijk nog `Apparaattype: Automatisch detecteren` /
+`Kleur: Nee` tonen. Daardoor ontbreekt de echte kleurcapaciteit in apps.
+
+Voor een door Bewust ICT beheerde HP-printer met `kleurAfdrukken=Kleur`
+controleert v1.3.0 de queue-eigen driveroptie
+`Config:DynamicRender` via de officiële Windows
+`Get-PrinterProperty` / `Set-PrinterProperty`-cmdlets.
+Wanneer nodig wordt `COLORDEVICE` afgedwongen **zonder de printer te benaderen**.
+Daarna controleert het script én de teruggelezen HP-waarde én
+`DeviceCapabilities(DC_COLORDEVICE)=1`. Als de HP-driver dat weigert, faalt
+de installatie; er komt geen vals-groene `SUCCESS`.
+
+`kleurAfdrukken=Zwart-wit` blijft de bestaande standaard in
+`Get-PrintConfiguration`. Een zwart-witqueue krijgt niet automatisch het
+kleur-apparaattype van een andere queue. Alle aanpassingen gebeuren op
+**de opgegeven queue**, niet op alle printers die de gedeelde HP-driver gebruiken.
+
+**Bestaande printers opnieuw toepassen:** `Actie=Installeren` is idempotent:
+driver/poort worden hergebruikt, maar afwijkende standaardinstellingen en
+de HP kleurcapaciteit worden opnieuw gecontroleerd en zo nodig hersteld.
+Alleen Bewust ICT beheerde queues worden gewijzigd.
+
+**HP Lade 3 blijft apart:** als `Cassette 3` niet door de offline HP-driver
+wordt aangeboden, stopt het script terecht. De HP-specifieke optie
+`Config:Tray3_install` wordt in deze versie **niet ongetest aangepast**.
+Een apparaatprofiel is niet hetzelfde als de afdrukbroninstelling.
+
+**Gebruikersvoorkeuren:** NinjaOne draait als SYSTEM en past globale
+queue-standaarden aan. Bestaande per-user instellingen in een gebruikersprofiel
+of specifieke applicatie mogen de global defaults nog overrulen. Een
+fysieke afdruk blijft nodig om het volledige klantresultaat te beoordelen.
+
 ## Kyocera: Windows MAX_PATH fix (v1.2.1)
 
 De originele Kyocera KX Universal driver-ZIP is ~251 MB en bevat geneste
@@ -51,7 +86,7 @@ pakte deze uit onder het lange `C:\ProgramData\BewustICT\PrinterDeployment\Drive
 Op `PC-JOHNNYWEIJER` werd dat pad 275 tekens lang; Windows PowerShell 5.1 /
 .NET Framework gooide daardoor `DirectoryNotFoundException` tijdens het uitpakken.
 
-Vanaf **v1.2.1-PILOT** blijft de originele ZIP SHA256-gecontroleerd in de
+Vanaf **v1.3.0-PILOT** blijft de originele ZIP SHA256-gecontroleerd in de
 bestaande drivercache, maar wordt de inhoud transactioneel uitgepakt onder
 `C:\ProgramData\BICPD\<eerste 24 hex van SHA256>\Expanded`.
 Hierdoor blijven OEM-submappen kort genoeg en wordt een afgebroken uitpakactie
@@ -83,7 +118,7 @@ De oude `Brother Mono Universal Printer (PCL)` is **niet** geschikt voor deze ze
 ## HP/Kyocera v1.1 - beveiliging, compatibiliteit en pilot
 
 - **Volledig automatisch**: één universele OEM-driver per merk, zonder printermodel en zonder handmatige driverinstallatie.
-- **Belangrijk:** vanaf deze release gebruikt `catalog/drivers.json` schemaVersion 2. Oude v0.9/v1.0-launchers stoppen bij HP/Kyocera daarom veilig vóór installatie. Vervang de vastgepinde launcher door **v1.2.1-PILOT**.
+- **Belangrijk:** vanaf deze release gebruikt `catalog/drivers.json` schemaVersion 2. Oude v0.9/v1.0-launchers stoppen bij HP/Kyocera daarom veilig vóór installatie. Vervang de vastgepinde launcher door **v1.3.0-PILOT**.
 - De fabrikantdownload wordt via SHA256 en de CAT-ondertekening gevalideerd. Het script controleert ook de *exacte* fingerprint en voegt zo nodig uitsluitend het overeenkomstige certificaat toe aan `LocalMachine\TrustedPublisher`, nooit aan Root. **Dit verleent het OEM-signercertificaat machinebrede uitgeversvertrouwensrechten**. Bij mislukte driverstaging wordt een nieuw toegevoegde trust zo mogelijk teruggedraaid.
 - **Certificaatrotatie:** Kyocera's gecontroleerde signingcertificaat verloopt op **8 december 2026**; HP's op **19 april 2027**. Update het gecertificeerde OEM-pakket vóór die datum.
 - **Pilot:** kies `Installeren`, `printerMerk=HP` of `Kyocera`, vul naam/IP en afdrukinstellingen in, laat `driverNaam` leeg. Controleer na `NINJAONE_PRINTER_AUTOMATION_OK` met `Get-Printer -Name '<printer>'` de driver, poort en een echte fysieke afdruk. Geen model-specifieke code; printertaal en RAW TCP/9100 moeten wel ondersteund zijn.
