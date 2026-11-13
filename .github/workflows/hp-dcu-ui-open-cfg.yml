@@ -94,6 +94,15 @@ jobs:
           }
           Start-Sleep -Seconds 2
           $wins=Dump-UI 'AFTER_FILE_MENU'
+          $openCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'Open')
+          $openItem=$wins[0].FindFirst([Windows.Automation.TreeScope]::Descendants,$openCondition)
+          if(-not $openItem){throw 'HP_DCU_OPEN_MENU_ITEM_NOT_FOUND'}
+          $openPat=$null
+          if(-not $openItem.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$openPat)){throw 'HP_DCU_OPEN_ITEM_UNINVOKABLE'}
+          ([Windows.Automation.InvokePattern]$openPat).Invoke()
+          Write-Host 'HP_DCU_OPEN_FILE_INVOKED'
+          Start-Sleep -Seconds 2
+          $wins=Dump-UI 'AFTER_OPEN_DIALOG'
           $desk=[Windows.Automation.AutomationElement]::RootElement
           $popups=$desk.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
           foreach($popup in $popups){
