@@ -1,0 +1,63 @@
+name: HP UPD per-queue color capability cache refresh after DeviceType switch
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-upd-color-spooler-refresh.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  refresh:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: On disposable Windows runner test Windows spooler cache refresh (not production)
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC HP Offline Color Cache'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'HP_BASELINE_FAILED'}
+          Import-Module PrintManagement
+          $name=$env:printerNaam
+          $source=@'
+          using System;using System.Runtime.InteropServices;
+          public static class HPCap {
+             [DllImport("winspool.drv",EntryPoint="DeviceCapabilitiesW",CharSet=CharSet.Unicode,SetLastError=true)]
+             public static extern int Get(string name,string port,short cap,IntPtr output,IntPtr devmode);
+          }
+          '@
+          Add-Type -TypeDefinition $source
+          function Report([string]$label) {
+             $p=Get-Printer -Name $name -ErrorAction Stop
+             $v=[string](Get-PrinterProperty -PrinterName $name -PropertyName 'Config:DynamicRender').Value
+             $cap=[HPCap]::Get($p.Name,$p.PortName,[Int16]32,[IntPtr]::Zero,[IntPtr]::Zero)
+             $cfg=Get-PrintConfiguration -PrinterName $name
+             Write-Host ("STATE="+$label+" DEVICE_TYPE="+$v+" WIN32_DC_COLORDEVICE="+$cap+" TICKET_COLOR="+$cfg.Color)
+          }
+          Report 'BASELINE'
+          Set-PrinterProperty -PrinterName $name -PropertyName 'Config:DynamicRender' -Value 'COLORDEVICE' -ErrorAction Stop
+          Report 'SET_PROPERTY'
+          Write-Host 'RESTART_SPOOLER_CI_ONLY'
+          Restart-Service -Name Spooler -Force -ErrorAction Stop
+          Start-Sleep -Seconds 5
+          Report 'AFTER_SPOOLER_RESTART'
+          # Set-PrintConfiguration may trigger vendor property sheet/default mode processing
+          Set-PrintConfiguration -PrinterName $name -Color $true -DuplexingMode OneSided -PaperSize A4 -ErrorAction Stop
+          Report 'AFTER_REAPPLY_DEFAULTS'
+          $queue=Get-Printer -Name $name
+          Set-Printer -Name $name -Comment $queue.Comment -ErrorAction Stop
+          Report 'AFTER_SET_PRINTER'
+          Write-Host 'HP_COLOR_REFRESH_PROBE_COMPLETE'
