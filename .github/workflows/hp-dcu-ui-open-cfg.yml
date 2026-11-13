@@ -44,6 +44,8 @@ jobs:
               [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
               [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] public static extern bool SetWindowText(IntPtr handle,string text);
               [DllImport("user32.dll",SetLastError=true)] public static extern bool PostMessage(IntPtr handle,uint msg,IntPtr w,IntPtr l);
+              [DllImport("user32.dll",SetLastError=true)] public static extern IntPtr GetDlgItem(IntPtr handle,int id);
+              [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] public static extern IntPtr FindWindowEx(IntPtr parent,IntPtr after,string cls,string name);
             }
           '@
           Add-Type -TypeDefinition $code
@@ -111,7 +113,15 @@ jobs:
           $editCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)
           $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$editCondition)
           if(-not $edit){throw 'DCU_CONFIG_FILE_EDIT_MISSING'}
+          $allEdits=$dialog.FindAll([Windows.Automation.TreeScope]::Descendants,$editCondition)
+          foreach($candidate in $allEdits){Write-Host ('DCU_EDIT_CANDIDATE name='+$candidate.Current.Name+' id='+$candidate.Current.AutomationId+' hwnd='+$candidate.Current.NativeWindowHandle)}
           $editHandle=[IntPtr]$edit.Current.NativeWindowHandle
+          if($editHandle -eq [IntPtr]::Zero) {
+             $dlg=[IntPtr]$dialog.Current.NativeWindowHandle
+             $cmb=[HPClick]::GetDlgItem($dlg,1148)
+             $editHandle=[HPClick]::FindWindowEx($cmb,[IntPtr]::Zero,'Edit',$null)
+             Write-Host ('DCU_NATIVE_DIALOG_HWND='+$dlg+' COMBO='+$cmb+' EDIT='+$editHandle)
+          }
           if($editHandle -eq [IntPtr]::Zero){throw 'HP_DCU_EDIT_NATIVE_HWND_MISSING'}
           $setOk=[HPClick]::SetWindowText($editHandle,$cfg)
           Write-Host ('HP_DCU_CFG_SETTEXT_WIN32='+$setOk+' HWND='+$editHandle)
