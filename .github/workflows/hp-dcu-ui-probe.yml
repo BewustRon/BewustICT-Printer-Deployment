@@ -1,0 +1,61 @@
+name: HP OEM Driver Configuration Utility UI automation probe (isolated)
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-dcu-ui-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Inspect signed HP PARK DCU UI tree without creating profiles
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $zip=Join-Path $env:RUNNER_TEMP 'park.zip'
+          & "$env:WINDIR\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 100 --output $zip 'https://ftp.hp.com/pub/softlib/software13/printers/UPD/HP-PARK-v1.9.2.zip'
+          if($LASTEXITCODE -ne 0){throw 'HP_PARK_DOWNLOAD_FAILED'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne '29D5FF4DDCD1F2D200DDDC3334F5AE0B6B1F2CECB508CA75CB1C7AFCE120766B'){throw 'HP_PARK_HASH_FAILED'}
+          $extract=Join-Path $env:RUNNER_TEMP 'park'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip,$extract)
+          $exe=Join-Path $extract 'driver configuration utility\hpbcfgap.exe'
+          if(-not (Test-Path $exe)){throw 'HP_DCU_EXE_MISSING'}
+          $sign=Get-AuthenticodeSignature $exe
+          Write-Host ('HP_DCU_SIGNATURE='+$sign.Status+' signer='+$sign.SignerCertificate.Subject)
+          Write-Host ('HP_DCU_FILE_VERSION='+(Get-Item $exe).VersionInfo.FileVersion)
+          $session=(Get-Process -Id $PID).SessionId
+          Write-Host ('POWERSHELL_SESSION_ID='+$session)
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          $p=Start-Process -FilePath $exe -PassThru
+          Write-Host ('HP_DCU_PROCESS_ID='+$p.Id)
+          Start-Sleep -Seconds 6
+          $p.Refresh()
+          Write-Host ('HP_DCU_EXITED='+$p.HasExited)
+          $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ProcessIdProperty,[int]$p.Id)
+          $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,$condition)
+          Write-Host ('HP_DCU_TOP_WINDOWS='+$windows.Count)
+          foreach($w in $windows){
+             Write-Host ('TOP NAME='+$w.Current.Name+' CLASS='+$w.Current.ClassName+' HANDLE='+$w.Current.NativeWindowHandle)
+             $queue=New-Object System.Collections.Queue
+             $queue.Enqueue([pscustomobject]@{e=$w;depth=0})
+             $counter=0
+             while($queue.Count -gt 0 -and $counter -lt 170){
+               $item=$queue.Dequeue();$counter++
+               $e=$item.e
+               Write-Host (('  '*$item.depth)+'ELEMENT '+$counter+' '+$e.Current.ControlType.ProgrammaticName+' name='+$e.Current.Name+' automationId='+$e.Current.AutomationId)
+               if($item.depth -lt 5){
+                 $children=$e.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+                 foreach($child in $children){$queue.Enqueue([pscustomobject]@{e=$child;depth=$item.depth+1})}
+               }
+             }
+          }
+          try{Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}catch{}
+          Write-Host 'HP_DCU_UI_PROBE_COMPLETE'
