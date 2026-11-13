@@ -1,0 +1,60 @@
+name: HP UPD offline Device Settings property sheet inspection
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-printui-settings-gui-inspect.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gui:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect authentic HP device settings GUI after offline printer installation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC HP GUI DeviceType'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'BASELINE_HP_OFFLINE_INSTALL_FAILED'}
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          $rundll=Join-Path $env:WINDIR 'System32\rundll32.exe'
+          $a='printui.dll,PrintUIEntry /p /n "'+$env:printerNaam+'"'
+          $p=Start-Process -FilePath $rundll -ArgumentList $a -PassThru
+          Start-Sleep -Seconds 8
+          Write-Host ('PRINTUI_PID='+$p.Id+' EXITED='+$p.HasExited)
+          $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+          $captured=@($windows|Where-Object {$_.Current.Name -match 'BIC HP GUI DeviceType|HP Universal Printing PCL 6'})
+          Write-Host ('PRINTUI_WINDOWS='+$captured.Count)
+          foreach($w in $captured){
+            Write-Host ('PRINTUI_WINDOW_NAME='+$w.Current.Name+' HANDLE='+$w.Current.NativeWindowHandle)
+            $queue=New-Object System.Collections.Queue
+            $queue.Enqueue([pscustomobject]@{e=$w;depth=0})
+            $i=0
+            while($queue.Count -gt 0 -and $i -lt 280){
+              $item=$queue.Dequeue();$i++
+              $e=$item.e
+              $n=$e.Current.Name;if($n.Length -gt 230){$n=$n.Substring(0,230)}
+              Write-Host ((' '*$item.depth)+'PRINTUI_ELEMENT '+$e.Current.ControlType.ProgrammaticName+' name='+$n+' id='+$e.Current.AutomationId+' handle='+$e.Current.NativeWindowHandle)
+              if($item.depth -lt 6){
+                $children=$e.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+                foreach($ch in $children){$queue.Enqueue([pscustomobject]@{e=$ch;depth=$item.depth+1})}
+              }
+            }
+          }
+          try{Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}catch{}
+          Write-Host 'HP_OFFLINE_PRINTUI_INSPECT_COMPLETE'
