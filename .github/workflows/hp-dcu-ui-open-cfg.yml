@@ -103,6 +103,25 @@ jobs:
           Write-Host 'HP_DCU_OPEN_FILE_INVOKED'
           Start-Sleep -Seconds 2
           $wins=Dump-UI 'AFTER_OPEN_DIALOG'
+          $dialogCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'Open Configuration File')
+          $dialog=$wins[0].FindFirst([Windows.Automation.TreeScope]::Descendants,$dialogCondition)
+          if(-not $dialog){throw 'DCU_CONFIG_OPEN_DIALOG_MISSING'}
+          $editCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)
+          $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$editCondition)
+          if(-not $edit){throw 'DCU_CONFIG_FILE_EDIT_MISSING'}
+          $valueObj=$null
+          if(-not $edit.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$valueObj)){throw 'DCU_FILE_EDIT_NO_VALUE_PATTERN'}
+          ([Windows.Automation.ValuePattern]$valueObj).SetValue($cfg)
+          Write-Host ('HP_DCU_OEM_CFG_FILE_SELECTED='+$cfg)
+          $okId=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1')
+          $openButton=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$okId)
+          if(-not $openButton){throw 'DCU_OPEN_DIALOG_BUTTON_NOT_FOUND'}
+          $invokeObj=$null
+          if(-not $openButton.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$invokeObj)){throw 'DCU_OPEN_BUTTON_UNINVOKABLE'}
+          ([Windows.Automation.InvokePattern]$invokeObj).Invoke()
+          Write-Host 'HP_DCU_OEM_CFG_LOAD_REQUESTED'
+          Start-Sleep -Seconds 4
+          $wins=Dump-UI 'AFTER_CFG_LOADED'
           $desk=[Windows.Automation.AutomationElement]::RootElement
           $popups=$desk.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
           foreach($popup in $popups){
