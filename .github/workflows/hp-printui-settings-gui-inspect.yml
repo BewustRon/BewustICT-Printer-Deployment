@@ -41,6 +41,19 @@ jobs:
           $captured=@($windows|Where-Object {$_.Current.Name -match 'BIC HP GUI DeviceType|HP Universal Printing PCL 6'})
           Write-Host ('PRINTUI_WINDOWS='+$captured.Count)
           foreach($w in $captured){
+            $tab=$w.FindFirst([Windows.Automation.TreeScope]::Descendants,
+               (New-Object Windows.Automation.PropertyCondition(
+                  [Windows.Automation.AutomationElement]::NameProperty,'Device Settings')))
+            if($tab) {
+               Write-Host ('DEVICE_SETTINGS_TAB_FOUND='+$tab.Current.ControlType.ProgrammaticName)
+               $pat=$null
+               if($tab.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pat)){
+                  ([Windows.Automation.SelectionItemPattern]$pat).Select()
+                  Write-Host 'DEVICE_SETTINGS_TAB_SELECTED'
+                  Start-Sleep -Seconds 2
+               }
+            }else{Write-Host 'DEVICE_SETTINGS_TAB_NOT_FOUND'}
+
             Write-Host ('PRINTUI_WINDOW_NAME='+$w.Current.Name+' HANDLE='+$w.Current.NativeWindowHandle)
             $queue=New-Object System.Collections.Queue
             $queue.Enqueue([pscustomobject]@{e=$w;depth=0})
