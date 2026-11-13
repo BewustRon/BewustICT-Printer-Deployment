@@ -40,7 +40,7 @@ jobs:
             @{Name='DynamicRender';Before='AUTODEVICE';After='COLORDEVICE'},
             @{Name='Tray3_install';Before='NotInstalled';After='Installed'}
           )){
-            $pattern='(?s)(<feature\\s+[^>]*>\\s*'+[regex]::Escape($item.Name)+'\\s*<current_option>)'+$item.Before+'(</current_option>)'
+            $pattern='(?s)(<feature\s+[^>]*>\s*'+[regex]::Escape($item.Name)+'\s*<current_option>)'+$item.Before+'(</current_option>)'
             if([regex]::Matches($profile,$pattern).Count -ne 1){throw ('CFM_FEATURE_MATCH_COUNT_WRONG='+$item.Name)}
             $profile=[regex]::Replace($profile,$pattern,'${1}'+$item.After+'${2}')
           }
