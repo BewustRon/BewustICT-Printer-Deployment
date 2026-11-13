@@ -80,9 +80,25 @@ jobs:
           Start-Sleep -Seconds 2
           $wins=Dump-UI 'NOTICE_DISMISSED'
           [void][HPClick]::SetForegroundWindow([IntPtr]$wins[0].Current.NativeWindowHandle)
-          [System.Windows.Forms.SendKeys]::SendWait('%fo')
+          $menuCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'File')
+          $fileMenu=$wins[0].FindFirst([Windows.Automation.TreeScope]::Descendants,$menuCondition)
+          if(-not $fileMenu){throw 'HP_DCU_FILE_MENU_NOT_FOUND'}
+          $pat=$null
+          if($fileMenu.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$pat)) {
+            ([Windows.Automation.ExpandCollapsePattern]$pat).Expand();Write-Host 'FILE_MENU_EXPANDED'
+          } elseif($fileMenu.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pat)) {
+            ([Windows.Automation.InvokePattern]$pat).Invoke();Write-Host 'FILE_MENU_INVOKED'
+          }else{
+            [System.Windows.Forms.SendKeys]::SendWait('%f')
+            Write-Host 'FILE_MENU_ALT_F'
+          }
           Start-Sleep -Seconds 2
-          $wins=Dump-UI 'AFTER_ALT_F_O'
+          $wins=Dump-UI 'AFTER_FILE_MENU'
+          $desk=[Windows.Automation.AutomationElement]::RootElement
+          $popups=$desk.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
+          foreach($popup in $popups){
+            if($popup.Current.ProcessId -eq $p.Id){Write-Host ('TOPPOPUP '+$popup.Current.ControlType.ProgrammaticName+' '+$popup.Current.Name)}
+          }
           Write-Host ('OEM_CFG_FOR_OPEN='+$cfg)
           Write-Host 'DCU_GUI_OPEN_PROBE_COMPLETE'
           try{Stop-Process $p.Id -Force -ErrorAction SilentlyContinue}catch{}
