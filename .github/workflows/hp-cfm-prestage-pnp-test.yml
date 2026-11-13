@@ -36,7 +36,7 @@ jobs:
             $pattern='(?s)(<feature\s+[^>]*>\s*'+[regex]::Escape($opt.key)+'\s*<current_option>)'+$opt.old+'(</current_option>)'
             $match=[regex]::Matches($text,$pattern)
             if($match.Count -ne 1){throw ('HP_CFM_FEATURE_NOT_UNIQUE='+$opt.key)}
-            $text=[regex]::Replace($text,$pattern,'1'+$opt.new+'2')
+            $text=[regex]::Replace($text,$pattern,'${1}'+$opt.new+'${2}')
           }
           [xml]$xml=$text
           [IO.File]::WriteAllText($cfm,$text,(New-Object Text.UTF8Encoding $false))
