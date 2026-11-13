@@ -43,8 +43,8 @@ jobs:
               [DllImport("user32.dll",SetLastError=true)] public static extern IntPtr SendMessage(IntPtr handle,uint msg,IntPtr w,IntPtr l);
               [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
             }
-            '@
-            Add-Type -TypeDefinition $code
+          '@
+          Add-Type -TypeDefinition $code
           $winCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ProcessIdProperty,[int]$p.Id)
           function Dump-UI([string]$label){
             $ws=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,$winCondition)
