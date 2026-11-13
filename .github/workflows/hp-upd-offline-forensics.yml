@@ -50,7 +50,7 @@ jobs:
           '@
           Add-Type -TypeDefinition $cs -ErrorAction Stop
           foreach($cap in @(32,12,6,16)){
-             $res=[HPOemCap]::DeviceCapabilities($p.Name,$p.PortName,[short]$cap,[IntPtr]::Zero,[IntPtr]::Zero)
+             $res=[HPOemCap]::DeviceCapabilities($p.Name,$p.PortName,[Int16]$cap,[IntPtr]::Zero,[IntPtr]::Zero)
              Write-Host ("DEVICE_CAPABILITY="+$cap+" RESULT="+$res)
           }
           Write-Host '=== GET PRINTER PROPERTY ==='
