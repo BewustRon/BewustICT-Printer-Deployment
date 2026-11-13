@@ -1,0 +1,70 @@
+name: HP offline per-queue Device Type Color and Tray3 with Windows PrintManagement
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-upd-set-printerproperty-pilot.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hp:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare unreachable HP universal printer and apply exact HP per-queue properties
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI HP Auto Color Tray3'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $powershell=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'HP_INITIAL_INSTALL_FAILED'}
+          Import-Module PrintManagement
+          Add-Type -AssemblyName System.Drawing
+          $name=$env:printerNaam
+          $colorProp='Config:DynamicRender'
+          $trayProp='Config:Tray3_install'
+          function Inspect-State([string]$marker) {
+             $color=(Get-PrinterProperty -PrinterName $name -PropertyName $colorProp -ErrorAction Stop).Value
+             $tray=(Get-PrinterProperty -PrinterName $name -PropertyName $trayProp -ErrorAction Stop).Value
+             $ps=New-Object System.Drawing.Printing.PrinterSettings
+             $ps.PrinterName=$name
+             $trayCount=@($ps.PaperSources|Where-Object {$_.SourceName -match '(?i)(?:tray|lade|cassette)\s*3(?:\s|$)'}).Count
+             $cfg=Get-PrintConfiguration -PrinterName $name
+             Write-Host ("STATE_"+$marker+" COLOR_DEVICE="+$color+" TRAY3="+$tray+" PAPER_SOURCES_TRAY3="+$trayCount+" PRINT_DEFAULT_COLOR="+$cfg.Color)
+          }
+          Inspect-State 'BEFORE'
+          Write-Host 'SET_HP_DEVICE_TYPE_COLOR_BEGIN'
+          Set-PrinterProperty -PrinterName $name -PropertyName $colorProp -Value 'COLORDEVICE' -ErrorAction Stop
+          Write-Host 'SET_HP_DEVICE_TYPE_COLOR_SUCCESS'
+          Inspect-State 'AFTER_COLOR'
+          Write-Host 'SET_HP_TRAY3_INSTALLED_BEGIN'
+          Set-PrinterProperty -PrinterName $name -PropertyName $trayProp -Value 'Installed' -ErrorAction Stop
+          Write-Host 'SET_HP_TRAY3_INSTALLED_SUCCESS'
+          Inspect-State 'AFTER_TRAY3'
+          $colorValue=[string](Get-PrinterProperty -PrinterName $name -PropertyName $colorProp).Value
+          $trayValue=[string](Get-PrinterProperty -PrinterName $name -PropertyName $trayProp).Value
+          if($colorValue -ne 'COLORDEVICE'){throw "DEVICE_TYPE_DID_NOT_PERSIST=$colorValue"}
+          if($trayValue -ne 'Installed'){throw "TRAY3_DID_NOT_PERSIST=$trayValue"}
+          $ps=New-Object System.Drawing.Printing.PrinterSettings
+          $ps.PrinterName=$name
+          $sources=@($ps.PaperSources | Where-Object {$_.SourceName -match '(?i)(?:tray|lade|cassette)\s*3(?:\s|$)'})
+          foreach($s in $sources){Write-Host ("DRIVER_NEW_TRAY3="+$s.SourceName+" RAW="+$s.RawKind)}
+          if($sources.Count -ne 1){throw "TRAY3_NOT_ADVERTISED_AFTER_SET_PRINTER_PROPERTY"}
+          & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\Set-BewustICTPrinterTray.ps1 -PrinterNaam $name -Papierlade 'Cassette 3' -Actie Instellen
+          if($LASTEXITCODE -ne 0){throw 'CANNOT_ENFORCE_GLOBAL_TRAY3'}
+          & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\Set-BewustICTPrinterTray.ps1 -PrinterNaam $name -Papierlade 'Cassette 3' -Actie Controleren
+          if($LASTEXITCODE -ne 0){throw 'CANNOT_VERIFY_GLOBAL_TRAY3'}
+          Write-Host 'HP_OFFLINE_DEVICE_TYPE_COLOR_AND_TRAY3_VERIFIED'
