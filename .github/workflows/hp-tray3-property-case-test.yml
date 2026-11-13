@@ -1,0 +1,50 @@
+name: HP Tray3 installable option supported value inspection offline
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-tray3-property-case-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  try:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply exact uppercase HP installable-option value on offline queue
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC HP CI Tray3 Property'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'BASE_HP_FAILED'}
+          Import-Module PrintManagement
+          Add-Type -AssemblyName System.Drawing
+          $name=$env:printerNaam
+          $property='Config:Tray3_install'
+          Write-Host ('BEFORE='+[string](Get-PrinterProperty -PrinterName $name -PropertyName $property).Value)
+          foreach($desired in @('INSTALLED','Installed')) {
+             try{
+               Set-PrinterProperty -PrinterName $name -PropertyName $property -Value $desired -ErrorAction Stop
+               Write-Host ('SET_OK='+$desired)
+             } catch { Write-Host ('SET_ERROR_VALUE='+$desired+' ERROR='+$_.Exception.Message+' HResult='+$_.Exception.HResult) }
+             $status=[string](Get-PrinterProperty -PrinterName $name -PropertyName $property).Value
+             $settings=New-Object System.Drawing.Printing.PrinterSettings
+             $settings.PrinterName=$name
+             $sources=@($settings.PaperSources|Where-Object {$_.SourceName -match '(?i)(tray|lade|cassette)\s*3(?:\s|$)'})
+             Write-Host ('AFTER_VALUE='+$desired+' STATUS='+$status+' SOURCES='+$sources.Count)
+             if($sources.Count -gt 0){foreach($s in $sources){Write-Host ('TRAY3_SOURCE='+$s.SourceName+' RAW='+$s.RawKind)}}
+          }
+          Write-Host 'HP_OFFLINE_TRAY3_VALUE_PROBE_COMPLETE'
