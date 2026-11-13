@@ -37,6 +37,14 @@ jobs:
           $cfg=Join-Path $env:RUNNER_TEMP 'upd\hpcpu360.cfg'
           $p=Start-Process $exe -PassThru
           Start-Sleep -Seconds 3
+          $code=@'
+            using System;using System.Runtime.InteropServices;
+            public static class HPClick {
+              [DllImport("user32.dll",SetLastError=true)] public static extern IntPtr SendMessage(IntPtr handle,uint msg,IntPtr w,IntPtr l);
+              [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
+            }
+            '@
+            Add-Type -TypeDefinition $code
           $winCondition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ProcessIdProperty,[int]$p.Id)
           function Dump-UI([string]$label){
             $ws=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,$winCondition)
@@ -66,14 +74,6 @@ jobs:
             ([Windows.Automation.InvokePattern]$invokeObj).Invoke()
             Write-Host 'NOTICE_OK_UIA_INVOKED'
           }else{
-            $code=@'
-            using System;using System.Runtime.InteropServices;
-            public static class HPClick {
-              [DllImport("user32.dll",SetLastError=true)] public static extern IntPtr SendMessage(IntPtr handle,uint msg,IntPtr w,IntPtr l);
-              [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
-            }
-            '@
-            Add-Type -TypeDefinition $code
             [void][HPClick]::SendMessage([IntPtr]$ok.Current.NativeWindowHandle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
             Write-Host 'NOTICE_OK_WIN32_CLICK'
           }
