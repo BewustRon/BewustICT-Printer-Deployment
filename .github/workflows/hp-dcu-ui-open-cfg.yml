@@ -173,6 +173,25 @@ jobs:
           Write-Host 'HP_DCU_DEVICE_TYPE_COMBO_EXPANDED'
           Start-Sleep -Seconds 1
           $wins=Dump-UI 'DEVICE_TYPE_OPTIONS'
+          try {
+            Add-Type -AssemblyName System.Drawing
+            $box=$wins[0].Current.BoundingRectangle
+            $left=[int]$box.Left;$top=[int]$box.Top
+            $width=[Math]::Min(1050,[Math]::Max(1,[int]$box.Width))
+            $height=[Math]::Min(820,[Math]::Max(1,[int]$box.Height))
+            $bitmap=New-Object System.Drawing.Bitmap($width,$height)
+            $canvas=[Drawing.Graphics]::FromImage($bitmap)
+            try{$canvas.CopyFromScreen($left,$top,0,0,$bitmap.Size)}finally{$canvas.Dispose()}
+            $memory=New-Object IO.MemoryStream
+            $codec=[Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object MimeType -eq 'image/jpeg'|Select-Object -First 1
+            $params=New-Object Drawing.Imaging.EncoderParameters 1
+            $params.Param[0]=New-Object Drawing.Imaging.EncoderParameter([Drawing.Imaging.Encoder]::Quality,[long]33)
+            $bitmap.Save($memory,$codec,$params)
+            $bitmap.Dispose()
+            Write-Host ('DCU_SCREENSHOT_JPEG_BASE64='+[Convert]::ToBase64String($memory.ToArray()))
+            $memory.Dispose()
+          }catch{Write-Host ('DCU_SCREENSHOT_NOT_AVAILABLE='+$_.Exception.Message)}
+
           $cbSource=@'
           using System;
           using System.Text;
