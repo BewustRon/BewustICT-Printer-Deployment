@@ -175,6 +175,39 @@ jobs:
           '@
           Add-Type -TypeDefinition $cbSource -ErrorAction Stop
           $cbHwnd=[IntPtr]$valueBox.Current.NativeWindowHandle
+          $infoType=@'
+          using System;
+          using System.Runtime.InteropServices;
+          [StructLayout(LayoutKind.Sequential)]
+          public struct HPRECT {public int left;public int top;public int right;public int bottom;}
+          [StructLayout(LayoutKind.Sequential)]
+          public struct HPCOMBOBOXINFO {
+             public int cbSize;public HPRECT rcItem;public HPRECT rcButton;public int stateButton;
+             public IntPtr hwndCombo;public IntPtr hwndItem;public IntPtr hwndList;
+          }
+          public static class HPComboInfo {
+             [DllImport("user32.dll",SetLastError=true)]
+             public static extern bool GetComboBoxInfo(IntPtr handle,ref HPCOMBOBOXINFO info);
+             [DllImport("user32.dll",EntryPoint="SendMessageW",CharSet=CharSet.Unicode)]
+             public static extern int SendCount(IntPtr hwnd,uint msg,IntPtr wParam,IntPtr lParam);
+             [DllImport("user32.dll",EntryPoint="SendMessageW",CharSet=CharSet.Unicode)]
+             public static extern int GetListText(IntPtr hwnd,uint msg,IntPtr item,System.Text.StringBuilder output);
+          }
+          '@
+          Add-Type -TypeDefinition $infoType -ErrorAction Stop
+          $ci=New-Object HPCOMBOBOXINFO
+          $ci.cbSize=[Runtime.InteropServices.Marshal]::SizeOf([type][HPCOMBOBOXINFO])
+          $canInfo=[HPComboInfo]::GetComboBoxInfo($cbHwnd,[ref]$ci)
+          Write-Host ('HP_DCU_COMBO_INFO='+$canInfo+' dropdown='+$ci.hwndList+' item='+$ci.hwndItem)
+          if($canInfo -and $ci.hwndList -ne [IntPtr]::Zero) {
+             $lc=[HPComboInfo]::SendCount($ci.hwndList,0x18B,[IntPtr]::Zero,[IntPtr]::Zero)
+             Write-Host ('HP_DCU_NATIVE_LIST_COUNT='+$lc)
+             for($idx=0; $idx -lt $lc -and $idx -lt 30; $idx++){
+               $str=New-Object Text.StringBuilder 256
+               $length=[HPComboInfo]::GetListText($ci.hwndList,0x189,[IntPtr]$idx,$str)
+               Write-Host ('HP_DCU_NATIVE_LIST_ITEM_'+$idx+'='+$str.ToString()+' LEN='+$length)
+             }
+          }
           $cbCount=[HPComboNative]::GetCount($cbHwnd,0x146,[IntPtr]::Zero,[IntPtr]::Zero)
           $cbSelected=[HPComboNative]::GetCount($cbHwnd,0x147,[IntPtr]::Zero,[IntPtr]::Zero)
           Write-Host ("HP_DCU_NATIVE_COMBO_HWND="+$cbHwnd+" COUNT="+$cbCount+" SELECTED="+$cbSelected)
