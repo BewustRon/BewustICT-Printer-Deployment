@@ -1,0 +1,82 @@
+name: HP official UPD CFM pre-stage before signed PnP driver installation
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-cfm-prestage-pnp-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preset:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - name: Install signed HP UPD with CFM color device and Tray3 pre-staged, printer offline
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference='SilentlyContinue'
+          $root=Join-Path $env:RUNNER_TEMP 'hp-prestage'
+          New-Item -ItemType Directory -Path $root -Force|Out-Null
+          $zip=Join-Path $root 'oem.zip'
+          & "$env:WINDIR\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 --output $zip 'https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip'
+          if($LASTEXITCODE -ne 0){throw 'HP_OEM_DOWNLOAD_FAILED'}
+          if((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne 'EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2'){throw 'HP_OEM_SHA256_MISMATCH'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $source=Join-Path $root 'driver'
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip,$source)
+          $cfg=Join-Path $source 'hpcpu360.cfg'
+          $cfm=Join-Path $source 'hpcpu360.cfm'
+          $inf=Join-Path $source 'hpcu360u.inf'
+          $cat=Join-Path $source 'hpcu360u.cat'
+          $text=[IO.File]::ReadAllText($cfg)
+          foreach($opt in @(@{key='DynamicRender';old='AUTODEVICE';new='COLORDEVICE'},@{key='Tray3_install';old='NotInstalled';new='Installed'})){
+            $pattern='(?s)(<feature\s+[^>]*>\s*'+[regex]::Escape($opt.key)+'\s*<current_option>)'+$opt.old+'(</current_option>)'
+            $match=[regex]::Matches($text,$pattern)
+            if($match.Count -ne 1){throw ('HP_CFM_FEATURE_NOT_UNIQUE='+$opt.key)}
+            $text=[regex]::Replace($text,$pattern,'1'+$opt.new+'2')
+          }
+          [xml]$xml=$text
+          [IO.File]::WriteAllText($cfm,$text,(New-Object Text.UTF8Encoding $false))
+          Write-Host ('HP_CFM_PROFILE_SHA256='+(Get-FileHash $cfm -Algorithm SHA256).Hash)
+          $signature=Get-AuthenticodeSignature -LiteralPath $cat
+          if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne 'BE845AAF486FD9F15D2C71BEED66E8AE21429EEA'){throw 'HP_CATALOG_SIGNATURE_MISMATCH'}
+          $trusted=New-Object Security.Cryptography.X509Certificates.X509Store('TrustedPublisher','LocalMachine')
+          $trusted.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+          try {$trusted.Add($signature.SignerCertificate)} finally {$trusted.Close()}
+          $spool=Join-Path $env:WINDIR 'System32\spool\drivers\x64\3'
+          New-Item -Path $spool -ItemType Directory -Force|Out-Null
+          Copy-Item -LiteralPath $cfm -Destination (Join-Path $spool 'hpcpu360.cfm') -Force
+          Write-Host ('HP_PRESPOOL_CFM_PRESENT='+(Test-Path (Join-Path $spool 'hpcpu360.cfm')))
+          & "$env:WINDIR\System32\pnputil.exe" /add-driver "$inf"
+          if($LASTEXITCODE -ne 0){throw 'PNPUTIL_FAILED'}
+          Add-PrinterDriver -Name 'HP Universal Printing PCL 6' -ErrorAction Stop
+          Write-Host ('HP_AFTER_ADD_DRIVER_CFM_EXISTS='+(Test-Path (Join-Path $spool 'hpcpu360.cfm')))
+          $name='BIC CI HP CFM Prestage ColorTray3'
+          Add-PrinterPort -Name 'BIC_TCP_192.0.2.50_9100' -PrinterHostAddress '192.0.2.50' -PortNumber 9100 -ErrorAction Stop
+          Add-Printer -Name $name -DriverName 'HP Universal Printing PCL 6' -PortName 'BIC_TCP_192.0.2.50_9100' -ErrorAction Stop
+          Import-Module PrintManagement
+          $actual=(Get-PrinterProperty -PrinterName $name -PropertyName 'Config:DynamicRender').Value
+          $tray=(Get-PrinterProperty -PrinterName $name -PropertyName 'Config:Tray3_install').Value
+          Write-Host ('HP_AFTER_PNP_PROFILE_DEVICE_TYPE='+$actual+' TRAY3='+$tray)
+          Add-Type -AssemblyName System.Drawing
+          $ps=New-Object Drawing.Printing.PrinterSettings
+          $ps.PrinterName=$name
+          foreach($p in @($ps.PaperSources)){if($p.SourceName -match '(?i)tray|lade'){Write-Host ('HP_PAPER_SOURCE='+$p.SourceName+' RAW='+$p.RawKind)}}
+          $cs=@'
+          using System;using System.Runtime.InteropServices;
+          public class HPColorCheck {
+            [DllImport("winspool.drv",EntryPoint="DeviceCapabilitiesW",CharSet=CharSet.Unicode,SetLastError=true)]
+            public static extern int Check(string name,string port,short flag,IntPtr output,IntPtr devmode);
+          }
+          '@
+          Add-Type -TypeDefinition $cs
+          $p=Get-Printer -Name $name
+          $native=[HPColorCheck]::Check($name,$p.PortName,[Int16]32,[IntPtr]::Zero,[IntPtr]::Zero)
+          Write-Host ('HP_NATIVE_COLOR_CAPABILITY='+$native)
+          $tray3=@($ps.PaperSources | Where-Object {$_.SourceName -match '(?i)(tray|lade)\s*3(?:\s|$)'})
+          Write-Host ('HP_OFFLINE_TRAY3_COUNT='+$tray3.Count)
+          if($native -ne 1 -or $tray3.Count -ne 1){throw 'HP_PRESTAGED_CFM_NOT_FULLY_APPLIED'}
+          Write-Host 'HP_PRESTAGED_CFM_OFFLINE_VERIFIED'
