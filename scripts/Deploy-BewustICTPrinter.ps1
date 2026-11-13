@@ -187,7 +187,7 @@ function Ensure-HpUPDColorDevice {
     # System.Drawing.PrinterSettings.SupportsColor (which may be true even
     # when HP's Device Type still says Auto and Print Management says No).
     if (-not ('BewustICT.HpColorDeviceNative' -as [type])) {
-        Add-Type -TypeDefinition @'
+        $NativeSource = @'
 using System;
 using System.Runtime.InteropServices;
 namespace BewustICT {
@@ -197,7 +197,8 @@ namespace BewustICT {
             IntPtr output, IntPtr devmode);
     }
 }
-'@ -ErrorAction Stop
+'@
+        Add-Type -TypeDefinition $NativeSource -ErrorAction Stop
     }
     $AfterValue = [string](Get-PrinterProperty -PrinterName $Name -PropertyName $PropertyName -ErrorAction Stop).Value
     $ActualQueue = Get-PrinterSafe -Name $Name
