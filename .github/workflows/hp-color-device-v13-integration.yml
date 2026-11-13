@@ -1,0 +1,97 @@
+name: NinjaOne HP UPD Color Device v1.3 offline regressions
+on:
+  push:
+    branches:
+      - fix/hp-upd-color-capability-idempotent-20261113
+    paths:
+      - scripts/Deploy-BewustICTPrinter.ps1
+      - .github/workflows/hp-color-device-v13-integration.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2025
+    timeout-minutes: 17
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: HP_Color_Existing_Drift
+            brand: HP
+            driver: HP Universal Printing PCL 6
+            color: Kleur
+            tray: Cassette 2
+            expectedColor: true
+          - case: HP_BlackWhite_Unaffected
+            brand: HP
+            driver: HP Universal Printing PCL 6
+            color: Zwart-wit
+            tray: Cassette 2
+            expectedColor: false
+          - case: Kyocera_NonHP_Regression
+            brand: Kyocera
+            driver: Kyocera Generic color KX
+            color: Kleur
+            tray: Automatisch
+            expectedColor: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse exact WinPS5 central script
+        shell: powershell
+        run: |
+          $tokens=$null;$errs=$null
+          [void][Management.Automation.Language.Parser]::ParseFile("$env:GITHUB_WORKSPACE\scripts\Deploy-BewustICTPrinter.ps1",[ref]$tokens,[ref]$errs)
+          if($errs.Count){$errs|ForEach-Object{Write-Host $_};throw 'CENTRAL_POWERHELL_PARSER_FAILED'}
+          Write-Host 'CENTRAL_PARSER_PASSED'
+      - name: Install and verify OEM printer offline; force HP color to recover after config drift
+        shell: powershell
+        env:
+          BIC_CASE: ${{ matrix.case }}
+          BIC_BRAND: ${{ matrix.brand }}
+          BIC_DRIVER: ${{ matrix.driver }}
+          BIC_COLOR: ${{ matrix.color }}
+          BIC_TRAY: ${{ matrix.tray }}
+          BIC_EXPECTEDCOLOR: ${{ matrix.expectedColor }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNative=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          $script=Join-Path $env:GITHUB_WORKSPACE 'scripts\Deploy-BewustICTPrinter.ps1'
+          $name='BIC CI '+$env:BIC_CASE
+          $params=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$script,
+             '-Actie','Installeren','-PrinterNaam',$name,'-PrinterIpAdres','192.0.2.50',
+             '-PrinterMerk',$env:BIC_BRAND,'-KleurAfdrukken',$env:BIC_COLOR,
+             '-DubbelzijdigAfdrukken','Uit','-Papierformaat','A4','-Papierlade',$env:BIC_TRAY)
+          Write-Host ("INSTALL_START="+$env:BIC_CASE)
+          & $PSNative @params
+          if($LASTEXITCODE -ne 0){throw "INSTALL_FAILED_"+$env:BIC_CASE}
+          Import-Module PrintManagement -ErrorAction Stop
+          $p=Get-Printer -Name $name -ErrorAction Stop
+          if($p.DriverName -ne $env:BIC_DRIVER){throw 'WRONG_DRIVER'}
+          $cfg=Get-PrintConfiguration -PrinterName $name -ErrorAction Stop
+          $want=($env:BIC_EXPECTEDCOLOR -eq 'true')
+          if([bool]$cfg.Color -ne $want){throw "WRONG_COLOR_DEFAULT="+$cfg.Color}
+          if([string]$cfg.DuplexingMode -ne 'OneSided'){throw 'WRONG_DUPLEX_DEFAULT'}
+          Write-Host ('INITIAL_COLOR_DEFAULT='+$cfg.Color)
+          if($env:BIC_BRAND -eq 'HP'){
+             $property='Config:DynamicRender'
+             $v=[string](Get-PrinterProperty -PrinterName $name -PropertyName $property).Value
+             Write-Host ('HP_DEVICE_TYPE_INITIAL='+$v)
+             if($want){
+               if($v -ne 'COLORDEVICE'){throw 'HP_COLOR_DEVICE_NOT_FORCED'}
+               Write-Host 'HP_MANAGED_COLOR_DEVICE_OK'
+               Set-PrinterProperty -PrinterName $name -PropertyName $property -Value 'AUTODEVICE' -ErrorAction Stop
+               $reset=[string](Get-PrinterProperty -PrinterName $name -PropertyName $property).Value
+               if($reset -ne 'AUTODEVICE'){throw 'CANNOT_SIMULATE_HP_DEVICE_DRIFT'}
+               Write-Host ('SIMULATED_HP_DEVICE_DRIFT='+$reset)
+               & $PSNative @params
+               if($LASTEXITCODE -ne 0){throw 'HP_EXISTING_QUEUE_REPAIR_FAILED'}
+               $recovered=[string](Get-PrinterProperty -PrinterName $name -PropertyName $property).Value
+               if($recovered -ne 'COLORDEVICE'){throw "HP_EXISTING_QUEUE_DEVICE_NOT_REPAIRED=$recovered"}
+               Write-Host 'HP_EXISTING_QUEUE_DEVICE_REPAIRED'
+             }else{
+               if($v -eq 'COLORDEVICE'){throw 'HP_MONO_QUEUE_WAS_SET_TO_COLORDEVICE'}
+               Write-Host 'HP_MONO_DEVICE_UNCHANGED'
+             }
+          }
+          Write-Host ('NINJAONE_OFFLINE_V13_REGRESSION_PASSED='+$env:BIC_CASE)
