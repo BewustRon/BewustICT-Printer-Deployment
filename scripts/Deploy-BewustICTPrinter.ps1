@@ -44,7 +44,7 @@ param(
     [string]$InstellenAlsStandaardprinter = 'false'
 )
 $ErrorActionPreference = 'Stop'
-$Version = '1.2.1-PILOT'
+$Version = '1.3.0-PILOT'
 $Root = Join-Path $env:ProgramData 'BewustICT\PrinterDeployment'
 $LogDir = Join-Path $Root 'Logs'
 $PkgDir = Join-Path $Root 'DriverPackages'
@@ -152,6 +152,64 @@ function Ensure-ManagedPrinterQueue {
     }
     return $Actual
 }
+# The HP UPD's public PrintTicket "Color=True" is only a job default. The
+# actual HP device type is a *per-queue* installable option, exposed through
+# the supported Windows Get/Set-PrinterProperty PrintManagement cmdlets.
+# On an offline HP UPD PCL6 install this defaults to AUTODEVICE, which presents
+# as "Kleur: Nee" in Print Management even if the print default is Color=True.
+# Do not modify raw printer registry data, signed CFG files, or shared driver
+# configuration. Update *only* the specified Bewust ICT managed HP queue.
+function Ensure-HpUPDColorDevice {
+    param(
+        [Parameter(Mandatory=$true)][string]$Name,
+        [Parameter(Mandatory=$true)][string]$DriverName,
+        [Parameter(Mandatory=$true)][bool]$RequireColor
+    )
+    if (-not $RequireColor) { return }
+    if ($DriverName -ne 'HP Universal Printing PCL 6') {
+        throw "HP kleurcapaciteit kan niet veilig worden afgedwongen met onbekende driver '$DriverName'."
+    }
+    $Queue = Get-PrinterSafe -Name $Name
+    if (-not $Queue -or -not ([string]$Queue.Comment).StartsWith('BewustICT-TCP|HP',[StringComparison]::OrdinalIgnoreCase)) {
+        throw "HP kleurconfiguratie geweigerd voor niet-beheerde printer '$Name'."
+    }
+    $PropertyName = 'Config:DynamicRender'
+    $BeforeProperty = Get-PrinterProperty -PrinterName $Name -PropertyName $PropertyName -ErrorAction Stop
+    $BeforeValue = [string]$BeforeProperty.Value
+    if ($BeforeValue -notin @('AUTODEVICE','COLORDEVICE','MONODEVICE')) {
+        throw "HP UPD geeft onbekend apparaat-type '$BeforeValue' terug. Geen wijziging uitgevoerd."
+    }
+    if ($BeforeValue -ne 'COLORDEVICE') {
+        Write-Log "HP apparaat-type aanpassen voor '$Name': $BeforeValue -> COLORDEVICE, zonder printerdetectie."
+        Set-PrinterProperty -PrinterName $Name -PropertyName $PropertyName -Value 'COLORDEVICE' -ErrorAction Stop
+    }
+    # Use the spooler's native DC_COLORDEVICE capability, not only
+    # System.Drawing.PrinterSettings.SupportsColor (which may be true even
+    # when HP's Device Type still says Auto and Print Management says No).
+    if (-not ('BewustICT.HpColorDeviceNative' -as [type])) {
+        $NativeSource = @'
+using System;
+using System.Runtime.InteropServices;
+namespace BewustICT {
+    public static class HpColorDeviceNative {
+        [DllImport("winspool.drv", EntryPoint="DeviceCapabilitiesW", CharSet=CharSet.Unicode, SetLastError=true)]
+        public static extern int DeviceCapabilities(string name, string port, short capability,
+            IntPtr output, IntPtr devmode);
+    }
+}
+'@
+        Add-Type -TypeDefinition $NativeSource -ErrorAction Stop
+    }
+    $AfterValue = [string](Get-PrinterProperty -PrinterName $Name -PropertyName $PropertyName -ErrorAction Stop).Value
+    $ActualQueue = Get-PrinterSafe -Name $Name
+    $ColorCapability = [BewustICT.HpColorDeviceNative]::DeviceCapabilities(
+        $ActualQueue.Name, $ActualQueue.PortName, [Int16]32, [IntPtr]::Zero, [IntPtr]::Zero)
+    if ($AfterValue -ne 'COLORDEVICE' -or $ColorCapability -ne 1) {
+        throw "HP_KLEURCAPACITEIT_NIET_INGESCHAKELD: '$Name'; apparaat-type=$AfterValue; WinSpool DC_COLORDEVICE=$ColorCapability."
+    }
+    Write-Log "HP_COLOR_DEVICE_VERIFIED: '$Name'; Apparaattype=$AfterValue; DC_COLORDEVICE=$ColorCapability. Alleen deze printerqueue aangepast."
+}
+
 function Invoke-OfflineQueueTest {
     param([switch]$Cleanup)
     # 192.0.2.0/24 is TEST-NET-1 (RFC 5737), geen klant- of printer-IP.
@@ -770,6 +828,9 @@ try {
     [void](Ensure-TcpPrinterPort -Name $PortName -IpAddress $PrinterIpAdres)
     $ExpectedMarker = "$MarkerPrefix$PrinterMerk"
     [void](Ensure-ManagedPrinterQueue -Name $PrinterNaam -Driver $ResolvedDriverName -PortName $PortName -Comment $ExpectedMarker -AllowedMarker $MarkerPrefix)
+    if ($PrinterMerk -eq 'HP') {
+        Ensure-HpUPDColorDevice -Name $PrinterNaam -DriverName $ResolvedDriverName -RequireColor ([bool]$Color)
+    }
     $Before = Get-ConfigRetry $PrinterNaam
     if ($Before.Color -ne $Color -or [string]$Before.DuplexingMode -ne $Duplex -or [string]$Before.PaperSize -ne $Papierformaat) {
         Set-PrintConfiguration -PrinterName $PrinterNaam -Color ([bool]$Color) -DuplexingMode $Duplex -PaperSize $Papierformaat -ErrorAction Stop
