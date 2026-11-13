@@ -160,6 +160,38 @@ jobs:
           Write-Host 'HP_DCU_DEVICE_TYPE_COMBO_EXPANDED'
           Start-Sleep -Seconds 1
           $wins=Dump-UI 'DEVICE_TYPE_OPTIONS'
+          $cbSource=@'
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class HPComboNative {
+              [DllImport("user32.dll",EntryPoint="SendMessageW",CharSet=CharSet.Unicode)]
+              public static extern int GetCount(IntPtr hwnd,uint msg,IntPtr wParam,IntPtr lParam);
+              [DllImport("user32.dll",EntryPoint="SendMessageW",CharSet=CharSet.Unicode)]
+              public static extern int GetText(IntPtr hwnd,uint msg,IntPtr index,StringBuilder output);
+              [DllImport("user32.dll",EntryPoint="SendMessageW",CharSet=CharSet.Unicode)]
+              public static extern int SetIndex(IntPtr hwnd,uint msg,IntPtr index,IntPtr unused);
+          }
+          '@
+          Add-Type -TypeDefinition $cbSource -ErrorAction Stop
+          $cbHwnd=[IntPtr]$valueBox.Current.NativeWindowHandle
+          $cbCount=[HPComboNative]::GetCount($cbHwnd,0x146,[IntPtr]::Zero,[IntPtr]::Zero)
+          $cbSelected=[HPComboNative]::GetCount($cbHwnd,0x147,[IntPtr]::Zero,[IntPtr]::Zero)
+          Write-Host ("HP_DCU_NATIVE_COMBO_HWND="+$cbHwnd+" COUNT="+$cbCount+" SELECTED="+$cbSelected)
+          $colorIndex=-1
+          if($cbCount -gt 0 -and $cbCount -le 32){
+            for($i=0;$i -lt $cbCount;$i++){
+              $buff=New-Object Text.StringBuilder 256
+              $n=[HPComboNative]::GetText($cbHwnd,0x148,[IntPtr]$i,$buff)
+              $v=$buff.ToString()
+              Write-Host ("HP_DCU_COMBO_OPTION_"+$i+"="+$v+" LEN="+$n)
+              if($v -eq 'Color'){$colorIndex=$i}
+            }
+          }
+          if($colorIndex -ge 0){
+            $new=[HPComboNative]::SetIndex($cbHwnd,0x14E,[IntPtr]$colorIndex,[IntPtr]::Zero)
+            Write-Host ("HP_DCU_NATIVE_COLOR_SET_INDEX="+$new)
+          }
           $options=$valueBox.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
           Write-Host ('HP_DCU_COLOR_OPTIONS_COUNT='+$options.Count)
           foreach($el in $options) {
