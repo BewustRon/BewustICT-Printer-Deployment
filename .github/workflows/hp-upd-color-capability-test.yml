@@ -1,0 +1,83 @@
+name: HP UPD offline color capability validation and Tray3 accepted names
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-upd-color-capability-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hpcolor:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use supported PrintManagement API to force HP color device offline
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC CI HP Color Capabilities'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw 'BASELINE_HP_INSTALL_FAILED'}
+          Import-Module PrintManagement
+          $name=$env:printerNaam
+          $driver=(Get-Printer -Name $name).DriverName
+          if($driver -ne 'HP Universal Printing PCL 6'){throw 'NOT_OFFICIAL_PINNED_HP_DRIVER'}
+          $colorKey='Config:DynamicRender'
+          $trayKey='Config:Tray3_install'
+          $src=@'
+          using System;using System.Runtime.InteropServices;
+          public static class HPColorCap {
+            [DllImport("winspool.drv", EntryPoint="DeviceCapabilitiesW",CharSet=CharSet.Unicode,SetLastError=true)]
+            public static extern int Get(string name,string port,short cap,IntPtr ptr,IntPtr pdevmode);
+          }
+          '@
+          Add-Type -TypeDefinition $src
+          function Capability() {
+             $p=Get-Printer -Name $name
+             return [HPColorCap]::Get($p.Name,$p.PortName,[Int16]32,[IntPtr]::Zero,[IntPtr]::Zero)
+          }
+          $beforeColor=(Get-PrinterProperty -PrinterName $name -PropertyName $colorKey).Value
+          Write-Host ('BEFORE_HP_DEVICE='+$beforeColor+' DC_COLORDEVICE='+(Capability))
+          if((Capability) -ne 0){throw 'EXPECTED_OFFLINE_HP_MONO_DEVICE_DEFAULT'}
+          Set-PrinterProperty -PrinterName $name -PropertyName $colorKey -Value 'COLORDEVICE' -ErrorAction Stop
+          $afterColor=(Get-PrinterProperty -PrinterName $name -PropertyName $colorKey).Value
+          $actualColor=Capability
+          Write-Host ('AFTER_HP_DEVICE='+$afterColor+' DC_COLORDEVICE='+$actualColor)
+          if($afterColor -ne 'COLORDEVICE'){throw 'HP_DEVICE_CONFIG_DID_NOT_SAVE'}
+          if($actualColor -ne 1){throw 'HP_DEVICE_COLOR_CAPABILITY_DID_NOT_ACTIVATE'}
+          # Rerun with same desired value must preserve capability
+          Set-PrinterProperty -PrinterName $name -PropertyName $colorKey -Value 'COLORDEVICE' -ErrorAction Stop
+          if((Capability) -ne 1){throw 'HP_COLOR_CAPABILITY_NOT_IDEMPOTENT'}
+          Write-Host 'HP_COLOR_CAPABILITY_OFFLINE_VERIFIED'
+          foreach($value in @('INSTALLED','Installed')){
+             try{
+               Set-PrinterProperty -PrinterName $name -PropertyName $trayKey -Value $value -ErrorAction Stop
+               Write-Host ('TRAY3_ACCEPTED_VARIANT='+$value)
+             }catch{
+               Write-Host ('TRAY3_VARIANT_FAILED='+$value+' '+$_.Exception.Message)
+             }
+             $status=(Get-PrinterProperty -PrinterName $name -PropertyName $trayKey).Value
+             Add-Type -AssemblyName System.Drawing
+             $s=New-Object System.Drawing.Printing.PrinterSettings
+             $s.PrinterName=$name
+             $tray3=@($s.PaperSources|Where-Object {$_.SourceName -match '(?i)(?:tray|lade|cassette)\s*3(?:\s|$)'})
+             Write-Host ('TRAY3_STATUS='+$status+' SOURCES='+$tray3.Count)
+             if($status -eq 'INSTALLED' -and $tray3.Count -eq 1){
+               Write-Host 'HP_TRAY3_OFFLINE_READY'
+               break
+             }
+          }
+          Write-Host 'HP_COLOR_AND_TRAY3_VARIANTS_INSPECTION_COMPLETE'
