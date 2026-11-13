@@ -151,6 +151,15 @@ jobs:
           }
           Start-Sleep -Seconds 2
           $wins=Dump-UI 'DEVICE_TYPE_CONTROL'
+          $idCond=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'20001')
+          $valueBox=$wins[0].FindFirst([Windows.Automation.TreeScope]::Descendants,$idCond)
+          if(-not $valueBox){throw 'HP_DCU_DEVICE_TYPE_COMBO_MISSING'}
+          $expandPat=$null
+          if(-not $valueBox.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$expandPat)){throw 'HP_DCU_DEVICE_COMBO_NOT_EXPANDABLE'}
+          ([Windows.Automation.ExpandCollapsePattern]$expandPat).Expand()
+          Write-Host 'HP_DCU_DEVICE_TYPE_COMBO_EXPANDED'
+          Start-Sleep -Seconds 1
+          $wins=Dump-UI 'DEVICE_TYPE_OPTIONS'
           $desk=[Windows.Automation.AutomationElement]::RootElement
           $popups=$desk.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
           foreach($popup in $popups){
