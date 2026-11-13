@@ -160,6 +160,31 @@ jobs:
           Write-Host 'HP_DCU_DEVICE_TYPE_COMBO_EXPANDED'
           Start-Sleep -Seconds 1
           $wins=Dump-UI 'DEVICE_TYPE_OPTIONS'
+          $options=$valueBox.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+          Write-Host ('HP_DCU_COLOR_OPTIONS_COUNT='+$options.Count)
+          foreach($el in $options) {
+            $label=$el.Current.Name
+            if($label.Length -gt 70){$label=$label.Substring(0,70)}
+            Write-Host ('HP_DCU_COLOR_OPTION '+$el.Current.ControlType.ProgrammaticName+' '+$label)
+          }
+          $colorEl=$null
+          foreach($el in $options) {
+             if($el.Current.Name -eq 'Color' -and $el.Current.ControlType -eq [Windows.Automation.ControlType]::ListItem){$colorEl=$el;break}
+          }
+          if($colorEl) {
+             $sp=$null
+             if(-not $colorEl.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$sp)){throw 'HP_DCU_COLOR_OPTION_UNSELECTABLE'}
+             ([Windows.Automation.SelectionItemPattern]$sp).Select()
+             Write-Host 'HP_DCU_COLOR_SELECTED_VIA_UIA'
+          }else{
+             $valueBox.SetFocus()
+             [System.Windows.Forms.SendKeys]::SendWait('{DOWN}')
+             [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+             Write-Host 'HP_DCU_COLOR_SELECTED_VIA_KEYBOARD'
+          }
+          Start-Sleep -Seconds 1
+          Write-Host ('HP_DCU_COLOR_COMBO_AFTER='+$valueBox.Current.Name)
+          $wins=Dump-UI 'AFTER_COLOR_SELECTION'
           $desk=[Windows.Automation.AutomationElement]::RootElement
           $popups=$desk.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
           foreach($popup in $popups){
