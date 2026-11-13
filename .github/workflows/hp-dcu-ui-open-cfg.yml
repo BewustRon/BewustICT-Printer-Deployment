@@ -129,6 +129,15 @@ jobs:
           Write-Host 'HP_DCU_OEM_CFG_LOAD_REQUESTED'
           Start-Sleep -Seconds 4
           $wins=Dump-UI 'AFTER_CFG_LOADED'
+          $deviceTabCond=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'Device Settings')
+          $deviceTab=$wins[0].FindFirst([Windows.Automation.TreeScope]::Descendants,$deviceTabCond)
+          if(-not $deviceTab){throw 'HP_DCU_DEVICE_SETTINGS_TAB_MISSING'}
+          $selPat=$null
+          if(-not $deviceTab.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$selPat)){throw 'HP_DCU_DEVICE_TAB_SELECTION_PATTERN_MISSING'}
+          ([Windows.Automation.SelectionItemPattern]$selPat).Select()
+          Write-Host 'HP_DCU_DEVICE_TAB_SELECTED'
+          Start-Sleep -Seconds 2
+          $wins=Dump-UI 'DEVICE_SETTINGS_TAB'
           $desk=[Windows.Automation.AutomationElement]::RootElement
           $popups=$desk.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
           foreach($popup in $popups){
