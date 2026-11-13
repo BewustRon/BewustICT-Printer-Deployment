@@ -35,6 +35,19 @@ jobs:
           }
           $exe=Join-Path $env:RUNNER_TEMP 'park\driver configuration utility\hpbcfgap.exe'
           $cfg=Join-Path $env:RUNNER_TEMP 'upd\hpcpu360.cfg'
+          $profile=[IO.File]::ReadAllText($cfg)
+          foreach($item in @(
+            @{Name='DynamicRender';Before='AUTODEVICE';After='COLORDEVICE'},
+            @{Name='Tray3_install';Before='NotInstalled';After='Installed'}
+          )){
+            $pattern='(?s)(<feature\\s+[^>]*>\\s*'+[regex]::Escape($item.Name)+'\\s*<current_option>)'+$item.Before+'(</current_option>)'
+            if([regex]::Matches($profile,$pattern).Count -ne 1){throw ('CFM_FEATURE_MATCH_COUNT_WRONG='+$item.Name)}
+            $profile=[regex]::Replace($profile,$pattern,'${1}'+$item.After+'${2}')
+          }
+          [xml]$checkedProfile=$profile
+          $cfg=[IO.Path]::ChangeExtension($cfg,'.cfm')
+          [IO.File]::WriteAllText($cfg,$profile,(New-Object System.Text.UTF8Encoding $false))
+          Write-Host ('HP_EXTERNAL_CFM_CREATED='+$cfg+' SHA256='+(Get-FileHash $cfg -Algorithm SHA256).Hash)
           $p=Start-Process $exe -PassThru
           Start-Sleep -Seconds 3
           $code=@'
