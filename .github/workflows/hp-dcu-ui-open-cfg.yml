@@ -138,6 +138,19 @@ jobs:
           Write-Host 'HP_DCU_DEVICE_TAB_SELECTED'
           Start-Sleep -Seconds 2
           $wins=Dump-UI 'DEVICE_SETTINGS_TAB'
+          $treeItemCond=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'Device Type:')
+          $treeItem=$wins[0].FindFirst([Windows.Automation.TreeScope]::Descendants,$treeItemCond)
+          if(-not $treeItem){throw 'HP_DCU_DEVICE_TYPE_TREE_MISSING'}
+          $selObj=$null
+          if($treeItem.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$selObj)){
+             ([Windows.Automation.SelectionItemPattern]$selObj).Select()
+             Write-Host 'HP_DCU_DEVICE_TYPE_TREE_SELECTED'
+          } else {
+             $treeItem.SetFocus()
+             Write-Host 'HP_DCU_DEVICE_TYPE_TREE_FOCUSED'
+          }
+          Start-Sleep -Seconds 2
+          $wins=Dump-UI 'DEVICE_TYPE_CONTROL'
           $desk=[Windows.Automation.AutomationElement]::RootElement
           $popups=$desk.FindAll([Windows.Automation.TreeScope]::Children,[Windows.Automation.Condition]::TrueCondition)
           foreach($popup in $popups){
