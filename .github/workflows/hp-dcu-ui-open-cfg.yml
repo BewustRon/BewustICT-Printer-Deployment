@@ -115,24 +115,17 @@ jobs:
           if(-not $edit){throw 'DCU_CONFIG_FILE_EDIT_MISSING'}
           $allEdits=$dialog.FindAll([Windows.Automation.TreeScope]::Descendants,$editCondition)
           foreach($candidate in $allEdits){Write-Host ('DCU_EDIT_CANDIDATE name='+$candidate.Current.Name+' id='+$candidate.Current.AutomationId+' hwnd='+$candidate.Current.NativeWindowHandle)}
-          $editHandle=[IntPtr]$edit.Current.NativeWindowHandle
-          if($editHandle -eq [IntPtr]::Zero) {
-             $dlg=[IntPtr]$dialog.Current.NativeWindowHandle
-             $cmb=[HPClick]::GetDlgItem($dlg,1148)
-             $editHandle=[HPClick]::FindWindowEx($cmb,[IntPtr]::Zero,'Edit',$null)
-             Write-Host ('DCU_NATIVE_DIALOG_HWND='+$dlg+' COMBO='+$cmb+' EDIT='+$editHandle)
-          }
-          if($editHandle -eq [IntPtr]::Zero){throw 'HP_DCU_EDIT_NATIVE_HWND_MISSING'}
-          $setOk=[HPClick]::SetWindowText($editHandle,$cfg)
-          Write-Host ('HP_DCU_CFG_SETTEXT_WIN32='+$setOk+' HWND='+$editHandle)
-          if(-not $setOk){throw 'HP_DCU_FILE_INPUT_FAILED'}
-          Write-Host ('HP_DCU_OEM_CFG_FILE_SELECTED='+$cfg)
-          $okId=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1')
-          $openButton=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$okId)
-          if(-not $openButton){throw 'DCU_OPEN_DIALOG_BUTTON_NOT_FOUND'}
-          $posted=[HPClick]::PostMessage([IntPtr]$openButton.Current.NativeWindowHandle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
-          Write-Host ('HP_DCU_OPEN_BUTTON_BM_CLICK_POSTED='+$posted)
-          if(-not $posted){throw 'HP_DCU_OPEN_BUTTON_CLICK_FAILED'}
+          Write-Host ('DCU_DIALOG_NATIVE='+$dialog.Current.NativeWindowHandle)
+          $fg=[HPClick]::SetForegroundWindow([IntPtr]$dialog.Current.NativeWindowHandle)
+          Write-Host ('DCU_FILE_DIALOG_FOREGROUND='+$fg)
+          # Common File Dialog filename accelerator: Alt+N, select current filename, type the absolute OEM cfg path.
+          [System.Windows.Forms.SendKeys]::SendWait('%n')
+          Start-Sleep -Milliseconds 250
+          [System.Windows.Forms.SendKeys]::SendWait('^a')
+          [System.Windows.Forms.SendKeys]::SendWait($cfg)
+          Start-Sleep -Milliseconds 300
+          Write-Host ('HP_DCU_CFG_TYPIST='+$cfg)
+          [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
           Write-Host 'HP_DCU_OEM_CFG_LOAD_REQUESTED'
           Start-Sleep -Seconds 4
           $wins=Dump-UI 'AFTER_CFG_LOADED'
