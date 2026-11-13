@@ -1,0 +1,100 @@
+name: HP UPD PCL6 offline queue capability and OEM CFG forensic
+on:
+  push:
+    branches:
+      - fix/hp-upd-device-capabilities-offline-20261113
+    paths:
+      - .github/workflows/hp-upd-offline-forensics.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  examine:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create color HP queue offline then inspect signed driver capabilities
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:actie='Installeren'
+          $env:printerNaam='BIC HP Forensic Color'
+          $env:printerIpAdres='192.0.2.50'
+          $env:printerMerk='HP'
+          $env:kleurAfdrukken='Kleur'
+          $env:dubbelzijdigAfdrukken='Uit'
+          $env:papierformaat='A4'
+          $env:papierlade='Automatisch'
+          $env:instellenAlsStandaardprinter='false'
+          $env:driverNaam=''
+          $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\NinjaOne-Printer-Bootstrap-v1.2.1-PILOT.ps1
+          if($LASTEXITCODE -ne 0){throw "BASELINE_HP_QUEUE_SETUP_FAILED"}
+          Import-Module PrintManagement
+          Add-Type -AssemblyName System.Drawing
+          $queueName=$env:printerNaam
+          $p=Get-Printer -Name $queueName
+          $cfg=Get-PrintConfiguration -PrinterName $queueName
+          $settings=New-Object System.Drawing.Printing.PrinterSettings
+          $settings.PrinterName=$queueName
+          Write-Host ("BASELINE_QUEUE="+$p.Name+" DRIVER="+$p.DriverName+" COLOR_DEFAULT="+$cfg.Color+" DUPLEX_DEFAULT="+$cfg.DuplexingMode+" SUPPORTS_COLOR="+$settings.SupportsColor)
+          Write-Host '=== NATIVE DEVICE CAPABILITY ==='
+          $cs=@'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class HPOemCap {
+             [DllImport("winspool.drv",EntryPoint="DeviceCapabilitiesW",CharSet=CharSet.Unicode,SetLastError=true)]
+             public static extern int DeviceCapabilities(string name,string port,short cap,IntPtr output,IntPtr devmode);
+          }
+          '@
+          Add-Type -TypeDefinition $cs -ErrorAction Stop
+          foreach($cap in @(32,12,6,16)){
+             $res=[HPOemCap]::DeviceCapabilities($p.Name,$p.PortName,[short]$cap,[IntPtr]::Zero,[IntPtr]::Zero)
+             Write-Host ("DEVICE_CAPABILITY="+$cap+" RESULT="+$res)
+          }
+          Write-Host '=== GET PRINTER PROPERTY ==='
+          try {
+             Get-PrinterProperty -PrinterName $queueName -ErrorAction Stop |
+             Select-Object PropertyName,Type,Value |
+             Format-Table -Wrap | Out-String -Width 240 | Write-Host
+          }catch{Write-Host ('PROPERTY_ERROR='+$_.Exception.Message)}
+          Write-Host '=== HP PER QUEUE REGISTRY NAMES, TYPES, SCALAR VALUES ONLY ==='
+          $base='HKLM:\SYSTEM\CurrentControlSet\Control\Print\Printers\'+$queueName
+          foreach($path in @($base,($base+'\PrinterDriverData'),($base+'\PrinterDriverData\HP'),($base+'\PrinterDriverData\Settings'))){
+             if(Test-Path -LiteralPath $path){
+                Write-Host ("QUEUE_REG_PATH="+$path)
+                $props=Get-ItemProperty -LiteralPath $path
+                $props.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
+                   $v=$_.Value
+                   if($v -is [byte[]]) { $preview='BinaryByteCount='+$v.Length } elseif($v -is [array]) {$preview='ArrayLength='+$v.Count} else {$preview=[string]$v;if($preview.Length -gt 140){$preview=$preview.Substring(0,140)}}
+                   Write-Host ('QUEUE_REG_ENTRY '+$_.Name+' = '+$preview)
+                }
+                Get-ChildItem -LiteralPath $path -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ("QUEUE_REG_CHILD="+$_.PSChildName)}
+             }
+          }
+          Write-Host '=== OEM SUPPLIED CONFIG FEATURE STRUCTURE ==='
+          $url='https://ftp.hp.com/pub/softlib/software13/printers/UPD/upd-pcl6-win11-x64-8.2.0.26819.zip'
+          $zip=Join-Path $env:RUNNER_TEMP 'oem.zip'
+          & "$env:WINDIR\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 80 --output $zip $url
+          if($LASTEXITCODE -ne 0){throw 'OEM_DOWNLOAD_FAILED'}
+          $hash='EDBACBBB0124FF5EF320C4023D7B540C8435263B37BA06812AB63DA2919534A2'
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne $hash){throw 'OEM_SHA256_MISMATCH'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entry=$archive.Entries | Where-Object FullName -eq 'hpcpu360.cfg' | Select-Object -First 1
+            if(-not $entry){throw 'OEM_CFG_NOT_FOUND'}
+            $reader=New-Object IO.StreamReader($entry.Open())
+            try{$txt=$reader.ReadToEnd()}finally{$reader.Dispose()}
+          }finally{$archive.Dispose()}
+          [xml]$doc=$txt
+          foreach($word in @('DynamicRender','Tray3_install','Tray2_install','Duplex_Installed','Automatic_Config')){
+             $nodes=@($doc.SelectNodes("//*[local-name()='feature' or local-name()='Feature']") | Where-Object {$_.InnerText -match [regex]::Escape($word)})
+             Write-Host ("CFG_QUERY="+$word+" COUNT="+$nodes.Count)
+             foreach($node in ($nodes | Select-Object -First 2)){
+               $outer=$node.OuterXml
+               Write-Host ("CFG_NODE_"+$word+"="+$outer.Substring(0,[Math]::Min($outer.Length,5500)))
+             }
+          }
+          Write-Host 'HP_UPD_OFFLINE_FORENSIC_COMPLETE'
